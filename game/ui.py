@@ -32,9 +32,33 @@ class GameUI:
         self.selected_mode = None
         self.running = False
 
-        # fonts and counters
-        self.font = pygame.font.SysFont(None, 28)
-        self.large_font = pygame.font.SysFont(None, 36)
+        # fonts and counters - 使用支持中文的字體
+        # 嘗試使用系統中文字體，如果找不到則使用 pygame 默認字體
+        chinese_fonts = ['microsoftyahei', 'microsoftyaheimicrosoftyaheiui', 'microsoftyaheiui', 
+                        'simhei', 'simsun', 'kaiti', 'fangsong', 'nsimsun', 
+                        'msgothic', 'mspgothic', 'notosanscjk', 'notosanscjksc',
+                        'arial', 'verdana']  # fallback to common fonts
+        
+        self.font = None
+        self.large_font = None
+        
+        # 嘗試載入中文字體
+        for font_name in chinese_fonts:
+            try:
+                self.font = pygame.font.SysFont(font_name, 28)
+                self.large_font = pygame.font.SysFont(font_name, 36)
+                # 測試是否能正確渲染中文
+                test_surface = self.font.render("測試", True, (255, 255, 255))
+                if test_surface.get_width() > 0:  # 如果能渲染出內容
+                    break
+            except Exception:
+                continue
+        
+        # 如果還是沒有找到合適的字體，使用 pygame 默認字體
+        if self.font is None:
+            self.font = pygame.font.Font(None, 28)
+            self.large_font = pygame.font.Font(None, 36)
+        
         self.n = 1
 
         # current episode score
