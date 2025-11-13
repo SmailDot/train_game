@@ -274,8 +274,8 @@ class GameUI:
             self.running = True
             self.agent = None
             self.current_score = 0.0
-            self.env.reset()
-            return
+            # Reset environment and return the new state
+            return self.env.reset()
         if not self.running and self.btn_ai.collidepoint(pos):
             self.selected_mode = "AI"
             self.mode = "AI"
@@ -287,8 +287,8 @@ class GameUI:
                     self.agent = PPOAgent()
                 except Exception:
                     self.agent = None
-            self.env.reset()
-            return
+            # Reset environment and return the new state
+            return self.env.reset()
         if hasattr(self, "btn_export") and self.btn_export.collidepoint(pos):
             self.export_weights()
             return
@@ -490,7 +490,9 @@ class GameUI:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    self.handle_click(event.pos)
+                    new_state = self.handle_click(event.pos)
+                    if new_state is not None:
+                        s = new_state
                 elif event.type == pygame.KEYDOWN:
                     if self.running and self.mode == "Human" and event.key == pygame.K_SPACE:
                         # queue a human jump for the main step

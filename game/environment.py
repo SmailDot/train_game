@@ -24,8 +24,11 @@ class GameEnv:
         self.reset()
 
     def reset(self):  # noqa: C901
-        # ball: spawn at a random vertical position (not too close to edges)
-        self.y = self.rng.uniform(20.0, float(self.ScreenHeight - 20.0))
+        # ball: spawn at a random vertical position in the middle 60% of screen
+        # avoid spawning too close to top or bottom edges
+        safe_min = self.ScreenHeight * 0.3  # 30% from top
+        safe_max = self.ScreenHeight * 0.7  # 70% from top (30% from bottom)
+        self.y = self.rng.uniform(safe_min, safe_max)
         self.vy = 0.0
         # one obstacle ahead (spawn at semi-random distance)
         self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
