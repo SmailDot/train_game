@@ -54,7 +54,7 @@ try:
             os.makedirs(save_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
 
-        def collect_trajectory(self, env: GameEnv, horizon=2048):
+        def collect_trajectory(self, env: GameEnv, horizon=2048, stop_event=None):
             """Collect a trajectory of length `horizon`.
 
             Returns a tuple (batch, ep_rewards)
@@ -67,6 +67,9 @@ try:
             ep_rewards = []
             cur_ep_reward = 0.0
             for t in range(horizon):
+                # allow early exit when requested
+                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                    break
                 s_t = torch.tensor(
                     s, dtype=torch.float32, device=self.device
                 ).unsqueeze(0)
@@ -195,7 +198,7 @@ try:
             )
             return path
 
-        def train(self, total_timesteps=20000, env=None, log_interval=1, metrics_callback=None):
+        def train(self, total_timesteps=20000, env=None, log_interval=1, metrics_callback=None, stop_event=None):
             """Main training loop.
 
             metrics_callback: optional callable(metrics: dict) called after each
@@ -206,7 +209,11 @@ try:
             timesteps = 0
             it = 0
             while timesteps < total_timesteps:
-                batch, ep_rewards = self.collect_trajectory(env)
+                # honor external stop request
+                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                    break
+
+                batch, ep_rewards = self.collect_trajectory(env, stop_event=stop_event)
                 timesteps += batch["states"].size(0)
                 loss, ploss, vloss, ent = self.ppo_update(batch)
                 it += 1
@@ -241,6 +248,10 @@ try:
                 if it % 10 == 0:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")
+
+                # allow stopping after update
+                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                    break
 
             self.writer.close()
 
