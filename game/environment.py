@@ -11,7 +11,7 @@ class GameEnv:
     so agents can consume normalized inputs.
     """
 
-    ScreenHeight = 200
+    ScreenHeight = 600  # 增加遊玩畫面高度以匹配更大的顯示區域
     MaxDist = 300
     MaxAbsVel = 20.0
     # horizontal scroll speed (pixels per step) base value
@@ -33,7 +33,7 @@ class GameEnv:
         # one obstacle ahead (spawn at semi-random distance)
         self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
         gap_center = self.ScreenHeight * 0.5
-        gap_half = 20.0
+        gap_half = 50.0  # 增加間隙：從 20.0 改為 50.0，總間隙從 40 變為 100 像素
         self.gap_top = gap_center - gap_half
         self.gap_bottom = gap_center + gap_half
         self.t = 0
@@ -86,8 +86,8 @@ class GameEnv:
         if self.ob_x < -50:
             # spawn new obstacle at a random distance ahead with random gap
             self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
-            gap_center = self.rng.uniform(40.0, self.ScreenHeight - 40.0)
-            gap_half = self.rng.uniform(16.0, 32.0)
+            gap_center = self.rng.uniform(80.0, self.ScreenHeight - 80.0)
+            gap_half = self.rng.uniform(45.0, 60.0)  # 增加隨機間隙：從 16-32 改為 45-60 像素
             self.gap_top = gap_center - gap_half
             self.gap_bottom = gap_center + gap_half
 
@@ -98,8 +98,10 @@ class GameEnv:
         # If previous ob_x > 0 and current ob_x <= 0, the obstacle passed the player
         gap_center = (self.gap_top + self.gap_bottom) / 2
         # award +5 for passing through if ball is within gap
+        # Use ball radius (12) + small margin for collision detection
+        ball_margin = 15.0  # 球半徑 12 + 小容差
         if self.prev_ob_x > 0 and self.ob_x <= 0:
-            if self.gap_top + 5 < self.y < self.gap_bottom - 5:
+            if self.gap_top + ball_margin < self.y < self.gap_bottom - ball_margin:
                 reward += 5.0
                 # increase passed counter (difficulty)
                 try:
@@ -114,7 +116,7 @@ class GameEnv:
             done = True
         else:
             # collision when obstacle near player and ball outside gap
-            if self.ob_x < 10 and not (self.gap_top + 5 < self.y < self.gap_bottom - 5):
+            if self.ob_x < 10 and not (self.gap_top + ball_margin < self.y < self.gap_bottom - ball_margin):
                 reward -= 5.0
                 done = True
 
