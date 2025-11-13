@@ -354,12 +354,6 @@ class GameUI:
             self.running = True
             self.current_score = 0.0
             self.game_over = False
-            # ensure agent exists (try to instantiate fallback if missing)
-            if self.agent is None:
-                try:
-                    self.agent = PPOAgent()
-                except Exception:
-                    self.agent = None
             
             # 啟動訓練視覺化視窗（獨立視窗）
             if self.training_window is None:
@@ -371,19 +365,56 @@ class GameUI:
             if self.trainer_thread is None or not self.trainer_thread.is_alive():
                 try:
                     from agents.pytorch_trainer import PPOTrainer
+                    import os
+                    
+                    # 檢查是否有已訓練的模型
+                    model_path = "checkpoints/ppo_best.pth"
+                    if os.path.exists(model_path):
+                        print(f"找到已訓練模型：{model_path}")
+                        try:
+                            import torch
+                            self.agent = PPOAgent()
+                            self.agent.net.load_state_dict(torch.load(model_path, weights_only=True))
+                            print("✅ 成功載入已訓練模型")
+                        except Exception as load_err:
+                            print(f"載入模型失敗：{load_err}")
+                            self.agent = PPOAgent()
+                            print("將使用未訓練的 agent")
+                    else:
+                        print("未找到已訓練模型，創建新 agent")
+                        self.agent = PPOAgent()
+                    
+                    # 創建訓練器
                     trainer = PPOTrainer()
+                    
+                    # 關鍵：讓 agent 共享訓練器的網絡權重
+                    # 這樣訓練器訓練的結果會實時反映到遊玩的 agent 上
+                    self.agent.net = trainer.net
+                    self.agent.opt = trainer.opt
+                    
                     # 創建獨立的訓練環境（與 UI 的 self.env 分離）
                     training_env = GameEnv()
-                    print("正在啟動 PPO 訓練器（使用獨立環境）...")
+                    print("正在啟動背景訓練器（agent 將隨訓練改進）...")
+                    
+                    # 啟動背景訓練（不阻塞 UI）
                     self.start_trainer(
                         trainer,
                         total_timesteps=50000,
-                        env=training_env,  # 使用獨立環境
+                        env=training_env,
                         log_interval=1
                     )
                 except Exception as e:
                     print(f"無法啟動訓練器：{e}")
-                    print("將使用現有 agent 進行遊玩")
+                    import traceback
+                    traceback.print_exc()
+                    # 如果訓練器失敗，創建隨機 agent
+                    if self.agent is None:
+                        try:
+                            self.agent = PPOAgent()
+                            print("將使用未訓練的 agent（表現會很差，請等待訓練）")
+                        except Exception:
+                            self.agent = None
+                            print("❌ 無法創建 agent，AI 模式將無法運作")
             
             # Reset environment and return the new state
             return self.env.reset()
@@ -662,12 +693,27 @@ class GameUI:
                 else:
                     # AI 模式自動重新開始
                     name = "AI"
-                    self.leaderboard.append((name, int(self.current_score)))
+                    score = int(self.current_score)
+                    self.leaderboard.append((name, score))
                     self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
                     try:
                         self._save_scores()
                     except Exception:
                         pass
+                    
+                    # 顯示當前回合的分數
+                    print(f"AI 回合 {self.n + 1} 結束，分數: {score}")
+                    
+                    # 渲染當前狀態（顯示死亡畫面）
+                    self.screen.fill(self.BG_COLOR)
+                    self.draw_playfield(s)
+                    self.draw_panel()
+                    pygame.display.flip()
+                    
+                    # 延遲 300ms，讓用戶看到 AI 死亡的瞬間
+                    pygame.time.wait(300)
+                    
+                    # 重置遊戲
                     self.current_score = 0.0
                     self.n += 1
                     s = self.env.reset()
