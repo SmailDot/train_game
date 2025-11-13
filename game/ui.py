@@ -1,5 +1,8 @@
 import sys
 import math
+import json
+import os
+import threading
 from typing import Optional
 
 import pygame
@@ -27,6 +30,10 @@ class GameUI:
         self.n = 1
         # current episode score
         self.current_score = 0.0
+        # latest numeric metrics reported by trainer (thread-safe)
+        self.latest_metrics = {}
+        # lock for thread-safe updates from trainer thread
+        self._lock = threading.Lock()
         # human jump flag (avoid double-stepping in key handler)
         self.human_jump = False
 
@@ -41,11 +48,20 @@ class GameUI:
 
         # leaderboard: list of (name, score), newest entries appended; keep top scores
         self.leaderboard = [("AgentA", 10), ("AgentB", 7), ("Human", 3)]
+        # try load persisted leaderboard (if present)
+        try:
+            self._ensure_checkpoints()
+            self._load_scores()
+        except Exception:
+            pass
         # loss history storage for visualization: dict of name -> list[float]
         self.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
         # surface for small loss plot
         self.loss_surf_size = (self.panel.width - 40, 120)
         self.loss_surf = pygame.Surface(self.loss_surf_size)
+
+        # thread reference if trainer started
+        self.trainer_thread = None
 
     def draw_playfield(self, state):
         # draw background for play area
@@ -189,8 +205,26 @@ class GameUI:
         loss_title = self.font.render("Losses (policy / value / entropy / total)", True, (200, 200, 200))
         self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
 
-        # draw simple multi-series plot
-        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 28, loss_rect.width - 16, loss_rect.height - 36)
+        # show numeric latest loss values (if any)
+        with self._lock:
+            lm = dict(self.latest_metrics) if self.latest_metrics else {}
+
+        txt_y = loss_rect.top + 28
+        try:
+            pol = f"policy: {lm.get('policy_loss'):.4f}" if lm.get('policy_loss') is not None else "policy: -"
+            val = f"value: {lm.get('value_loss'):.4f}" if lm.get('value_loss') is not None else "value: -"
+            ent = f"entropy: {lm.get('entropy'):.4f}" if lm.get('entropy') is not None else "entropy: -"
+            tot = f"total: {lm.get('loss'):.4f}" if lm.get('loss') is not None else "total: -"
+        except Exception:
+            pol = val = ent = tot = "-"
+
+        self.screen.blit(self.font.render(pol, True, (200, 180, 180)), (loss_rect.left + 8, txt_y))
+        self.screen.blit(self.font.render(val, True, (180, 220, 180)), (loss_rect.left + 8 + 140, txt_y))
+        self.screen.blit(self.font.render(ent, True, (180, 180, 220)), (loss_rect.left + 8 + 280, txt_y))
+        self.screen.blit(self.font.render(tot, True, (220, 220, 140)), (loss_rect.left + 8 + 420, txt_y))
+
+        # draw simple multi-series plot (below numeric summary)
+        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 48, loss_rect.width - 16, loss_rect.height - 60)
 
         # leaderboard
         lb_top = nn_rect.bottom + 12
@@ -224,9 +258,12 @@ class GameUI:
         # draw dark background
         pygame.draw.rect(surf, (24, 24, 28), (0, 0, w, h))
 
-        # determine max length among series
+        # determine max length among series (thread-safe copy)
+        with self._lock:
+            lh_copy = {k: list(v) for k, v in self.loss_history.items()}
+
         max_len = 0
-        for v in self.loss_history.values():
+        for v in lh_copy.values():
             if v:
                 max_len = max(max_len, len(v))
 
@@ -246,7 +283,7 @@ class GameUI:
         }
 
         for name, color in series_colors.items():
-            seq = list(self.loss_history.get(name, []))
+            seq = list(lh_copy.get(name, []))
             if not seq:
                 continue
             seq = seq[-N:]
@@ -306,6 +343,81 @@ class GameUI:
         except Exception:
             return
 
+    # --- persistence helpers for leaderboard ---
+    def _ensure_checkpoints(self):
+        os.makedirs("checkpoints", exist_ok=True)
+
+    def _load_scores(self):
+        p = os.path.join("checkpoints", "scores.json")
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # expect list of [name,score]
+                if isinstance(data, list):
+                    self.leaderboard = [tuple(x) for x in data]
+            except Exception:
+                # ignore malformed
+                pass
+
+    def _save_scores(self):
+        p = os.path.join("checkpoints", "scores.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(self.leaderboard, f, ensure_ascii=False, indent=2)
+
+    # --- trainer/metrics API ---
+    def update_losses(self, metrics: dict):
+        """Called from trainer (background thread). Accepts a dict of metrics.
+
+        Expected keys: 'it','loss','policy_loss','value_loss','entropy','timesteps','mean_reward','episode_count'
+        """
+        if not isinstance(metrics, dict):
+            return
+        with self._lock:
+            # keep simple series, append floats if present
+            try:
+                if metrics.get("policy_loss") is not None:
+                    self.loss_history.setdefault("policy", []).append(float(metrics.get("policy_loss")))
+                if metrics.get("value_loss") is not None:
+                    self.loss_history.setdefault("value", []).append(float(metrics.get("value_loss")))
+                if metrics.get("entropy") is not None:
+                    self.loss_history.setdefault("entropy", []).append(float(metrics.get("entropy")))
+                if metrics.get("loss") is not None:
+                    self.loss_history.setdefault("total", []).append(float(metrics.get("loss")))
+
+                # store latest metrics for numeric display
+                self.latest_metrics.update({k: metrics.get(k) for k in ("it", "loss", "policy_loss", "value_loss", "entropy", "timesteps", "mean_reward", "episode_count")})
+                # also update n (iteration) if present
+                try:
+                    if metrics.get("it") is not None:
+                        self.n = int(metrics.get("it"))
+                except Exception:
+                    pass
+            except Exception:
+                # keep training robust to odd metric values
+                pass
+
+    def start_trainer(self, trainer, **train_kwargs):
+        """Start trainer.train(...) in a background daemon thread and wire metrics to UI.update_losses.
+
+        Example:
+            ui.start_trainer(trainer, total_timesteps=5000, env=env)
+        """
+        if self.trainer_thread is not None and self.trainer_thread.is_alive():
+            # already running
+            return
+
+        def _runner():
+            try:
+                trainer.train(metrics_callback=self.update_losses, **train_kwargs)
+            except Exception:
+                # swallow to avoid killing the UI thread
+                pass
+
+        t = threading.Thread(target=_runner, daemon=True)
+        t.start()
+        self.trainer_thread = t
+
     def run(self):
         s = self.env.reset()
         running = True
@@ -348,6 +460,11 @@ class GameUI:
                 self.leaderboard.append((name, int(self.current_score)))
                 # keep top 10 entries sorted by score desc
                 self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
+                # persist leaderboard
+                try:
+                    self._save_scores()
+                except Exception:
+                    pass
                 # reset current score for next episode
                 self.current_score = 0.0
 

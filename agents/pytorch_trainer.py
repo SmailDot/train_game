@@ -55,8 +55,17 @@ try:
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
 
         def collect_trajectory(self, env: GameEnv, horizon=2048):
+            """Collect a trajectory of length `horizon`.
+
+            Returns a tuple (batch, ep_rewards)
+            where batch is the usual tensor batch used by ppo_update and
+            ep_rewards is a list of episode total rewards encountered during
+            the horizon (may be empty).
+            """
             states, actions, rewards, dones, values, logps = [], [], [], [], [], []
             s = env.reset()
+            ep_rewards = []
+            cur_ep_reward = 0.0
             for t in range(horizon):
                 s_t = torch.tensor(
                     s, dtype=torch.float32, device=self.device
@@ -79,9 +88,14 @@ try:
                 values.append(value.item())
                 logps.append(logp.item())
 
-                s = s_next
+                # track episode reward for reporting
+                cur_ep_reward += float(r)
                 if done:
+                    ep_rewards.append(cur_ep_reward)
+                    cur_ep_reward = 0.0
                     s = env.reset()
+                else:
+                    s = s_next
 
             # compute last value
             s_t = torch.tensor(s, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -126,7 +140,7 @@ try:
             batch["advs"] = (batch["advs"] - batch["advs"].mean()) / (
                 batch["advs"].std() + 1e-8
             )
-            return batch
+            return batch, ep_rewards
 
         def ppo_update(self, batch):
             N = batch["states"].size(0)
@@ -181,12 +195,18 @@ try:
             )
             return path
 
-        def train(self, total_timesteps=20000, env=None, log_interval=1):
+        def train(self, total_timesteps=20000, env=None, log_interval=1, metrics_callback=None):
+            """Main training loop.
+
+            metrics_callback: optional callable(metrics: dict) called after each
+            PPO update with keys: it, loss, policy_loss, value_loss, entropy,
+            timesteps, mean_reward, episode_count
+            """
             env = env or GameEnv()
             timesteps = 0
             it = 0
             while timesteps < total_timesteps:
-                batch = self.collect_trajectory(env)
+                batch, ep_rewards = self.collect_trajectory(env)
                 timesteps += batch["states"].size(0)
                 loss, ploss, vloss, ent = self.ppo_update(batch)
                 it += 1
@@ -195,6 +215,29 @@ try:
                 self.writer.add_scalar("loss/policy", ploss, it)
                 self.writer.add_scalar("loss/value", vloss, it)
                 self.writer.add_scalar("policy/entropy", ent, it)
+
+                mean_reward = float(np.mean(ep_rewards)) if ep_rewards else None
+                episode_count = len(ep_rewards)
+
+                # callback for UI or external monitor
+                try:
+                    if metrics_callback is not None:
+                        metrics_callback(
+                            {
+                                "it": it,
+                                "loss": float(loss),
+                                "policy_loss": float(ploss),
+                                "value_loss": float(vloss),
+                                "entropy": float(ent),
+                                "timesteps": int(timesteps),
+                                "mean_reward": mean_reward,
+                                "episode_count": episode_count,
+                            }
+                        )
+                except Exception:
+                    # metrics callback must not break training
+                    pass
+
                 if it % 10 == 0:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")

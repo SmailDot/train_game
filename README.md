@@ -126,3 +126,30 @@ $$L = L^{CLIP} + c_{vf} L^{VF} - c_{ent} S[\pi]\; .$$
 
 若要把其他公式或變數加入 README（例如更細的超參數表格或輸出正規化細節），我可以把它補進來。
 
+## 從 Trainer 到 UI 的即時串接（範例）
+
+UI 已支援由訓練器在背景執行時直接推送訓練指標到畫面：
+
+- UI 方法：`GameUI.update_losses(metrics: dict)` -- 訓練器會以字典形式回報 metrics，常見 keys 包含：
+	- `it` (iteration)、`loss` (total loss)、`policy_loss`、`value_loss`、`entropy`、`timesteps`、`mean_reward`、`episode_count`。
+- UI 方法：`GameUI.start_trainer(trainer, **train_kwargs)` -- 在背景 thread 執行 `trainer.train(...)`，並自動把 `metrics_callback` 綁到 `ui.update_losses`。
+
+範例：在你的啟動腳本或 `run_game.py` 中可以這樣呼叫：
+
+```python
+from agents.pytorch_trainer import PPOTrainer
+from game.ui import GameUI
+
+ui = GameUI()
+trainer = PPOTrainer()
+
+# 啟動 trainer，在背景執行；UI 會即時顯示 loss/entropy/value/total 與最新數值
+ui.start_trainer(trainer, total_timesteps=10000, env=ui.env, log_interval=1)
+
+# 然後啟動 UI loop（主 thread）
+ui.run()
+```
+
+註：`start_trainer` 會在背景執行 `trainer.train(metrics_callback=ui.update_losses, **train_kwargs)`。
+因此也可以直接把 `PPOTrainer.train` 中的 `metrics_callback` 參數指向你自己的回呼函式來做整合（例如紀錄到外部監控系統）。
+

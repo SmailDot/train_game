@@ -22,6 +22,14 @@ try:
             value = self.critic(x)
             return logits, value
 
+        def get_weight_matrix(self):
+            """Return a small 2D numpy array representing actor layer weights for visualization."""
+            try:
+                w = self.actor.weight.detach().cpu().numpy()
+                return w
+            except Exception:
+                return None
+
 except Exception:
     # Numpy fallback
     import numpy as np
@@ -41,3 +49,10 @@ except Exception:
             logits = h.dot(self.wa)
             value = h.dot(self.wv)
             return logits, value
+
+        def get_weight_matrix(self):
+            # return actor weights approximation
+            try:
+                return self.wa.copy()
+            except Exception:
+                return None
