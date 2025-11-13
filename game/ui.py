@@ -80,7 +80,6 @@ class GameUI:
 
         # map env coords to pixels
         # state[0] is normalized y (0..1), map to play_area height
-        # Note: env uses ScreenHeight=200, but UI may have different height
         s_y = state[0]  # normalized y [0,1]
         y_px = int(s_y * self.env.ScreenHeight)  # map back to env's coordinate system
         # clamp to visible range
@@ -89,24 +88,31 @@ class GameUI:
         # ball: fixed x position at 20% of play area width
         ball_x = int(self.play_area.width * 0.2)
         ball_y = y_px
-        pygame.draw.circle(self.screen, (255, 200, 50), (ball_x, ball_y), 12)
-
-        # obstacle: state[2] is normalized obstacle x [0,1] where 1=MaxDist, 0=at player
-        # We need to map this to screen coordinates
-        # When ob_x=MaxDist (far right), normalized=1, should appear at right edge of play area
-        # When ob_x=0 (at player), normalized=0, should appear at ball_x position
-        ob_x_norm = state[2]  # 0..1
-        # Map: normalized 0 -> ball_x, normalized 1 -> play_area.width
-        ob_x_px = int(ball_x + ob_x_norm * (self.play_area.width - ball_x))
         
-        # gap coordinates: already normalized to [0,1] by env
-        gap_top_px = int(state[3] * self.env.ScreenHeight)
-        gap_bottom_px = int(state[4] * self.env.ScreenHeight)
-
-        # draw obstacle: top pillar and bottom pillar with gap in between
+        # Draw all obstacles (scrolling from right to left)
         obstacle_width = 40
-        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, 0, obstacle_width, gap_top_px))
-        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, gap_bottom_px, obstacle_width, self.env.ScreenHeight - gap_bottom_px))
+        if hasattr(self.env, 'get_all_obstacles'):
+            for ob_x, gap_top, gap_bottom in self.env.get_all_obstacles():
+                # Map obstacle x from env coordinates to screen coordinates
+                # env: x=0 is at player (ball_x), x=MaxDist is far right (play_area.width)
+                # Linear mapping: screen_x = ball_x + (ob_x / MaxDist) * (play_area.width - ball_x)
+                scale = (self.play_area.width - ball_x) / self.env.MaxDist
+                ob_x_px = int(ball_x + ob_x * scale)
+                
+                # Only draw obstacles that are visible on screen
+                if -obstacle_width < ob_x_px < self.play_area.width:
+                    gap_top_px = int(gap_top)
+                    gap_bottom_px = int(gap_bottom)
+                    
+                    # draw top pillar and bottom pillar with gap in between
+                    pygame.draw.rect(self.screen, (10, 120, 10), 
+                                   (ob_x_px, 0, obstacle_width, gap_top_px))
+                    pygame.draw.rect(self.screen, (10, 120, 10), 
+                                   (ob_x_px, gap_bottom_px, obstacle_width, 
+                                    self.env.ScreenHeight - gap_bottom_px))
+        
+        # Draw ball on top of obstacles
+        pygame.draw.circle(self.screen, (255, 200, 50), (ball_x, ball_y), 12)
 
     def draw_panel(self):
         pygame.draw.rect(self.screen, (18, 18, 22), self.panel)
