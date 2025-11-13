@@ -22,15 +22,21 @@ class GameUI:
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("Train Game (1280x720)")
         self.clock = pygame.time.Clock()
-    self.env = env or GameEnv()
-    self.agent = agent
-    # start in menu mode; user must choose Human or AI to start a run
-    self.mode = "Menu"
-    self.selected_mode = None
-    self.running = False
+
+        # environment and agent
+        self.env = env or GameEnv()
+        self.agent = agent
+
+        # start in menu mode; user must choose Human or AI to start a run
+        self.mode = "Menu"
+        self.selected_mode = None
+        self.running = False
+
+        # fonts and counters
         self.font = pygame.font.SysFont(None, 28)
         self.large_font = pygame.font.SysFont(None, 36)
         self.n = 1
+
         # current episode score
         self.current_score = 0.0
         # latest numeric metrics reported by trainer (thread-safe)
@@ -57,6 +63,7 @@ class GameUI:
             self._load_scores()
         except Exception:
             pass
+
         # loss history storage for visualization: dict of name -> list[float]
         self.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
         # surface for small loss plot
@@ -65,6 +72,7 @@ class GameUI:
 
         # thread reference if trainer started
         self.trainer_thread = None
+        self._trainer_stop_event = None
 
     def draw_playfield(self, state):
         # draw background for play area
@@ -106,7 +114,7 @@ class GameUI:
         self.screen.blit(b_text, (self.btn_board.left + 10, self.btn_board.top + 10))
 
         # mode indicator & n
-    mode_text = self.font.render(f"Mode: {self.mode}", True, (200, 200, 200))
+        mode_text = self.font.render(f"Mode: {self.mode}", True, (200, 200, 200))
         n_text = self.font.render(f"目前訓練回合 n={self.n}", True, (200, 200, 200))
         self.screen.blit(mode_text, (self.panel.left + 20, 260))
         self.screen.blit(n_text, (self.panel.left + 20, 290))
@@ -431,16 +439,32 @@ class GameUI:
             # already running
             return
 
+        # create a stop event and run trainer in a non-daemon thread so we can join
+        stop_event = threading.Event()
+        self._trainer_stop_event = stop_event
+
         def _runner():
             try:
-                trainer.train(metrics_callback=self.update_losses, **train_kwargs)
+                trainer.train(metrics_callback=self.update_losses, stop_event=stop_event, **train_kwargs)
             except Exception:
                 # swallow to avoid killing the UI thread
                 pass
 
-        t = threading.Thread(target=_runner, daemon=True)
+        t = threading.Thread(target=_runner, daemon=False)
         t.start()
         self.trainer_thread = t
+
+    def stop_trainer(self, wait=True, timeout=None):
+        """Signal the background trainer to stop and optionally join the thread."""
+        if self._trainer_stop_event is None:
+            return
+        try:
+            self._trainer_stop_event.set()
+            if wait and self.trainer_thread is not None:
+                self.trainer_thread.join(timeout)
+        finally:
+            self._trainer_stop_event = None
+            self.trainer_thread = None
 
     def run(self):
         s = self.env.reset()
@@ -455,6 +479,15 @@ class GameUI:
                     if self.mode == "Human" and event.key == pygame.K_SPACE:
                         # queue a human jump for the main step
                         self.human_jump = True
+            # if not running (menu), only render and continue
+            if not self.running:
+                # render only
+                self.screen.fill(self.BG_COLOR)
+                self.draw_playfield(s)
+                self.draw_panel()
+                pygame.display.flip()
+                self.clock.tick(self.FPS)
+                continue
 
             if self.mode == "AI":
                 if self.agent is not None:
