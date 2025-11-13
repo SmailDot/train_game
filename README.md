@@ -30,7 +30,6 @@ python -m pytest -q
 ```
 
 GitHub 工作流程（建議）
-- 請在每次提交時使用中文提交訊息，例如：
 
 ```
 git commit -m "新增：PPO agent skeleton 與測試（中文提交）"
@@ -48,3 +47,22 @@ git push -u origin main
 ```
 
 （確保你已經在 GitHub 建立 repository 並擁有 push 權限）
+CI badge (示範)：
+
+![CI](https://github.com/SmailDot/train_game/actions/workflows/ci.yml/badge.svg)
+
+啟用 pre-commit hooks：
+
+```powershell
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+若想啟動 PyTorch 版訓練器：
+
+```powershell
+# 建議安裝 CPU 版 torch 或依照你的 CUDA 版本安裝
+pip install -r requirements.txt
+python -c "from agents.pytorch_trainer import PPOTrainer; t=PPOTrainer(); t.train(total_timesteps=2000)"
+```

@@ -1,5 +1,8 @@
 numpy
 pytest
 # Optional (install if you plan to run the PyTorch PPO implementation):
-# torch
-# pygame
+# For CPU-only, install the CPU wheel for your platform. Example (Windows):
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
+tensorboard
+pygame
