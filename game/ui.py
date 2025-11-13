@@ -25,6 +25,10 @@ class GameUI:
         self.font = pygame.font.SysFont(None, 28)
         self.large_font = pygame.font.SysFont(None, 36)
         self.n = 1
+        # current episode score
+        self.current_score = 0.0
+        # human jump flag (avoid double-stepping in key handler)
+        self.human_jump = False
 
         # UI layout
         self.play_area = pygame.Rect(0, 0, int(self.WIDTH * 0.75), self.HEIGHT)
@@ -35,7 +39,7 @@ class GameUI:
         self.btn_ai = pygame.Rect(self.panel.left + 20, 110, self.panel.width - 40, 50)
         self.btn_board = pygame.Rect(self.panel.left + 20, 180, self.panel.width - 40, 50)
 
-        # for leaderboard placeholder
+        # leaderboard: list of (name, score), newest entries appended; keep top scores
         self.leaderboard = [("AgentA", 10), ("AgentB", 7), ("Human", 3)]
 
     def draw_playfield(self, state):
@@ -82,6 +86,9 @@ class GameUI:
         n_text = self.font.render(f"目前訓練回合 n={self.n}", True, (200, 200, 200))
         self.screen.blit(mode_text, (self.panel.left + 20, 260))
         self.screen.blit(n_text, (self.panel.left + 20, 290))
+        # current score
+        score_text = self.font.render(f"本局分數: {int(self.current_score)}", True, (200, 200, 200))
+        self.screen.blit(score_text, (self.panel.left + 20, 320))
 
         # NN placeholder (simple rectangle with title)
         nn_rect = pygame.Rect(self.panel.left + 20, 340, self.panel.width - 40, 200)
@@ -246,11 +253,8 @@ class GameUI:
                     self.handle_click(event.pos)
                 elif event.type == pygame.KEYDOWN:
                     if self.mode == "Human" and event.key == pygame.K_SPACE:
-                        # human jump
-                        s, r, done, _ = self.env.step(1)
-                        if done:
-                            self.n += 1
-                            s = self.env.reset()
+                        # queue a human jump for the main step
+                        self.human_jump = True
 
             if self.mode == "AI":
                 if self.agent is not None:
@@ -260,8 +264,28 @@ class GameUI:
                     # no agent: step without action
                     s, r, done, _ = self.env.step(0)
             else:
-                # Human mode: if not pressing space, do step with 0
-                s, r, done, _ = self.env.step(0)
+                # Human mode: perform queued jump or step with 0
+                if self.human_jump:
+                    action = 1
+                    self.human_jump = False
+                else:
+                    action = 0
+                s, r, done, _ = self.env.step(action)
+
+            # update current score and leaderboard when episodes end
+            try:
+                self.current_score += float(r)
+            except Exception:
+                pass
+
+            if done:
+                name = "AI" if self.mode == "AI" else "Human"
+                # record final score (integer)
+                self.leaderboard.append((name, int(self.current_score)))
+                # keep top 10 entries sorted by score desc
+                self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
+                # reset current score for next episode
+                self.current_score = 0.0
 
             if done:
                 self.n += 1
