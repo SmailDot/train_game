@@ -367,15 +367,18 @@ class GameUI:
                 self.training_window.start()
             
             # 啟動背景訓練（如果 PyTorch 可用）
+            # 重要：為訓練器創建獨立的環境實例，避免與 UI 主循環衝突
             if self.trainer_thread is None or not self.trainer_thread.is_alive():
                 try:
                     from agents.pytorch_trainer import PPOTrainer
                     trainer = PPOTrainer()
-                    print("正在啟動 PPO 訓練器...")
+                    # 創建獨立的訓練環境（與 UI 的 self.env 分離）
+                    training_env = GameEnv()
+                    print("正在啟動 PPO 訓練器（使用獨立環境）...")
                     self.start_trainer(
                         trainer,
                         total_timesteps=50000,
-                        env=self.env,
+                        env=training_env,  # 使用獨立環境
                         log_interval=1
                     )
                 except Exception as e:
