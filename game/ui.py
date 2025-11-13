@@ -89,23 +89,87 @@ class GameUI:
         nn_title = self.font.render("Neural Net (weights heatmap placeholder)", True, (200, 200, 200))
         self.screen.blit(nn_title, (nn_rect.left + 8, nn_rect.top + 8))
 
-        # draw a simple fake heatmap
-        cell_w = (nn_rect.width - 16) // 8
-        cell_h = (nn_rect.height - 40) // 4
-        for i in range(4):
-            for j in range(8):
-                v = (math.sin(i * 0.5 + j * 0.3 + self.n * 0.05) + 1) / 2
-                c = int(80 + v * 160)
-                pygame.draw.rect(
-                    self.screen,
-                    (c, 80, 200 - c // 2),
-                    (
-                        nn_rect.left + 8 + j * cell_w,
-                        nn_rect.top + 36 + i * cell_h,
-                        cell_w - 2,
-                        cell_h - 2,
-                    ),
-                )
+        # try to draw a real weight heatmap if agent/net provides it, otherwise fallback to a fake heatmap
+        w = None
+        try:
+            if self.agent is not None and hasattr(self.agent, "net") and hasattr(self.agent.net, "get_weight_matrix"):
+                w = self.agent.net.get_weight_matrix()
+            elif hasattr(self.env, "net") and hasattr(self.env.net, "get_weight_matrix"):
+                w = self.env.net.get_weight_matrix()
+        except Exception:
+            w = None
+
+        # prepare grid dims
+        grid_rows = 4
+        grid_cols = 8
+        cell_w = (nn_rect.width - 16) // grid_cols
+        cell_h = (nn_rect.height - 40) // grid_rows
+
+        if w is not None:
+            try:
+                import numpy as _np
+
+                arr = _np.array(w)
+                # If 1D, expand to 2D
+                if arr.ndim == 1:
+                    arr = arr.reshape(1, -1)
+
+                # Resize or pad/crop to grid_rows x grid_cols
+                # Simple approach: scale arr to (grid_rows, grid_cols) via averaging/padding
+                # If arr is smaller, pad with zeros; if larger, crop
+                r, c = arr.shape
+                target = _np.zeros((grid_rows, grid_cols), dtype=_np.float32)
+                rr = min(r, grid_rows)
+                cc = min(c, grid_cols)
+                target[:rr, :cc] = arr[:rr, :cc]
+
+                # normalize to 0..255
+                mn = target.min()
+                mx = target.max()
+                if mx - mn == 0:
+                    norm = _np.zeros_like(target)
+                else:
+                    norm = (target - mn) / (mx - mn)
+
+                for i in range(grid_rows):
+                    for j in range(grid_cols):
+                        v = float(norm[i, j])
+                        cval = int(40 + v * 215)
+                        pygame.draw.rect(
+                            self.screen,
+                            (cval, int(120 * (1 - v)), 200 - cval // 3),
+                            (
+                                nn_rect.left + 8 + j * cell_w,
+                                nn_rect.top + 36 + i * cell_h,
+                                cell_w - 2,
+                                cell_h - 2,
+                            ),
+                        )
+            except Exception:
+                w = None
+
+        if w is None:
+            # fallback fake heatmap (animated)
+            for i in range(grid_rows):
+                for j in range(grid_cols):
+                    v = (math.sin(i * 0.5 + j * 0.3 + self.n * 0.05) + 1) / 2
+                    c = int(80 + v * 160)
+                    pygame.draw.rect(
+                        self.screen,
+                        (c, 80, 200 - c // 2),
+                        (
+                            nn_rect.left + 8 + j * cell_w,
+                            nn_rect.top + 36 + i * cell_h,
+                            cell_w - 2,
+                            cell_h - 2,
+                        ),
+                    )
+
+        # Export weights button
+        self.btn_export = pygame.Rect(self.panel.left + 20, nn_rect.top - 40, self.panel.width - 40, 28)
+        pygame.draw.rect(self.screen, (80, 60, 80), self.btn_export)
+        ex_text = self.font.render("Export weights to TensorBoard", True, (240, 240, 240))
+        self.screen.blit(ex_text, (self.btn_export.left + 8, self.btn_export.top + 4))
 
         # leaderboard
         lb_top = nn_rect.bottom + 12
@@ -122,8 +186,53 @@ class GameUI:
         if self.btn_ai.collidepoint(pos):
             self.mode = "AI"
             return
+        if hasattr(self, "btn_export") and self.btn_export.collidepoint(pos):
+            self.export_weights()
+            return
         if self.btn_board.collidepoint(pos):
             # toggle leaderboard maybe
+            return
+
+    def export_weights(self):
+        """Export actor weights to TensorBoard (if available) or save a local numpy file.
+
+        This is best-effort: if the agent has a network exposing get_weight_matrix(), use it.
+        """
+        try:
+            w = None
+            if self.agent is not None and hasattr(self.agent, "net") and hasattr(self.agent.net, "get_weight_matrix"):
+                w = self.agent.net.get_weight_matrix()
+            elif hasattr(self.env, "net") and hasattr(self.env.net, "get_weight_matrix"):
+                w = self.env.net.get_weight_matrix()
+
+            if w is None:
+                # nothing to export
+                return
+
+            # try tensorboard
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+                import numpy as _np
+
+                writer = SummaryWriter(log_dir="checkpoints/tb_ui")
+                # make image: normalize weights to [0,255]
+                arr = _np.array(w)
+                arr = arr - arr.min()
+                denom = arr.max() if arr.max() != 0 else 1.0
+                img = (arr / denom * 255).astype(_np.uint8)
+                # ensure 3 channels
+                if img.ndim == 2:
+                    img = _np.stack([img, img, img], axis=2)
+                img = img.transpose(2, 0, 1)
+                writer.add_image("actor_weights", img, global_step=self.n)
+                writer.flush()
+                writer.close()
+            except Exception:
+                # fallback: save numpy
+                import numpy as _np
+
+                _np.save(f"checkpoints/weights_n{self.n}.npy", _np.array(w))
+        except Exception:
             return
 
     def run(self):
