@@ -22,9 +22,12 @@ class GameUI:
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("Train Game (1280x720)")
         self.clock = pygame.time.Clock()
-        self.env = env or GameEnv()
-        self.agent = agent
-        self.mode = "AI" if agent is not None else "Human"
+    self.env = env or GameEnv()
+    self.agent = agent
+    # start in menu mode; user must choose Human or AI to start a run
+    self.mode = "Menu"
+    self.selected_mode = None
+    self.running = False
         self.font = pygame.font.SysFont(None, 28)
         self.large_font = pygame.font.SysFont(None, 36)
         self.n = 1
@@ -103,7 +106,7 @@ class GameUI:
         self.screen.blit(b_text, (self.btn_board.left + 10, self.btn_board.top + 10))
 
         # mode indicator & n
-        mode_text = self.font.render(f"Mode: {self.mode}", True, (200, 200, 200))
+    mode_text = self.font.render(f"Mode: {self.mode}", True, (200, 200, 200))
         n_text = self.font.render(f"目前訓練回合 n={self.n}", True, (200, 200, 200))
         self.screen.blit(mode_text, (self.panel.left + 20, 260))
         self.screen.blit(n_text, (self.panel.left + 20, 290))
@@ -205,6 +208,13 @@ class GameUI:
         loss_title = self.font.render("Losses (policy / value / entropy / total)", True, (200, 200, 200))
         self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
 
+        # If we're in Menu mode (not running), draw a simple start hint
+        if not self.running:
+            title = self.large_font.render("Train Game", True, (240, 240, 240))
+            hint = self.font.render("Click 'Human Play' or 'AI Play' to start", True, (200, 200, 200))
+            self.screen.blit(title, (self.play_area.width // 2 - 80, 40))
+            self.screen.blit(hint, (self.play_area.width // 2 - 160, 80))
+
         # show numeric latest loss values (if any)
         with self._lock:
             lm = dict(self.latest_metrics) if self.latest_metrics else {}
@@ -235,11 +245,25 @@ class GameUI:
             self.screen.blit(t, (self.panel.left + 20, lb_top + 24 + idx * 22))
 
     def handle_click(self, pos):
-        if self.btn_human.collidepoint(pos):
+        # If not running, these buttons start a run
+        if not self.running and self.btn_human.collidepoint(pos):
+            self.selected_mode = "Human"
             self.mode = "Human"
+            self.running = True
+            self.agent = None
+            self.env.reset()
             return
-        if self.btn_ai.collidepoint(pos):
+        if not self.running and self.btn_ai.collidepoint(pos):
+            self.selected_mode = "AI"
             self.mode = "AI"
+            self.running = True
+            # ensure agent exists (try to instantiate fallback if missing)
+            if self.agent is None:
+                try:
+                    self.agent = PPOAgent()
+                except Exception:
+                    self.agent = None
+            self.env.reset()
             return
         if hasattr(self, "btn_export") and self.btn_export.collidepoint(pos):
             self.export_weights()

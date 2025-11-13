@@ -14,6 +14,8 @@ class GameEnv:
     ScreenHeight = 200
     MaxDist = 300
     MaxAbsVel = 20.0
+    # horizontal scroll speed (pixels per step)
+    ScrollSpeed = 2.0
 
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
@@ -23,8 +25,8 @@ class GameEnv:
         # ball
         self.y = self.ScreenHeight * 0.5
         self.vy = 0.0
-        # one obstacle ahead
-        self.ob_x = 220.0
+        # one obstacle ahead (spawn at semi-random distance)
+        self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
         gap_center = self.ScreenHeight * 0.5
         gap_half = 20.0
         self.gap_top = gap_center - gap_half
@@ -69,14 +71,14 @@ class GameEnv:
         self.vy = max(min(self.vy, self.MaxAbsVel), -self.MaxAbsVel)
         self.y += self.vy * dt
 
-        # move obstacle left
+        # move obstacle left by configured scroll speed
         self.prev_ob_x = self.ob_x
-        self.ob_x -= 2.0
+        self.ob_x -= self.ScrollSpeed
         if self.ob_x < -50:
-            # spawn new obstacle with random gap
-            self.ob_x = 220.0
-            gap_center = self.rng.uniform(40, self.ScreenHeight - 40)
-            gap_half = self.rng.uniform(16, 32)
+            # spawn new obstacle at a random distance ahead with random gap
+            self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
+            gap_center = self.rng.uniform(40.0, self.ScreenHeight - 40.0)
+            gap_half = self.rng.uniform(16.0, 32.0)
             self.gap_top = gap_center - gap_half
             self.gap_bottom = gap_center + gap_half
 
