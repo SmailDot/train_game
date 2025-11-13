@@ -3,7 +3,7 @@ from game.environment import GameEnv
 
 def test_gravity_integration():
     env = GameEnv(seed=0)
-    s0 = env.reset()
+    env.reset()
     y0 = env.y
     vy0 = env.vy
     # step a few frames without jumping

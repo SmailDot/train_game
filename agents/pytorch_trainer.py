@@ -9,9 +9,8 @@ Notes:
 - This implementation is intentionally clear rather than highly-optimized.
 - For faster training use vectorized envs (multiprocessing) and larger batch sizes.
 """
+
 import os
-import time
-from collections import deque
 
 import numpy as np
 
@@ -19,14 +18,29 @@ try:
     import torch
     import torch.nn.functional as F
     from torch.utils.tensorboard import SummaryWriter
+
     from agents.networks import ActorCritic
     from game.environment import GameEnv
 
     class PPOTrainer:
-        def __init__(self, save_dir="checkpoints", lr=3e-4, gamma=0.99, lam=0.95,
-                     clip_eps=0.2, vf_coef=0.5, ent_coef=0.01, batch_size=64, ppo_epochs=4,
-                     device=None):
-            self.device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+        def __init__(
+            self,
+            save_dir="checkpoints",
+            lr=3e-4,
+            gamma=0.99,
+            lam=0.95,
+            clip_eps=0.2,
+            vf_coef=0.5,
+            ent_coef=0.01,
+            batch_size=64,
+            ppo_epochs=4,
+            device=None,
+        ):
+            self.device = device or (
+                torch.device("cuda")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
             self.net = ActorCritic().to(self.device)
             self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
             self.gamma = gamma
@@ -44,13 +58,17 @@ try:
             states, actions, rewards, dones, values, logps = [], [], [], [], [], []
             s = env.reset()
             for t in range(horizon):
-                s_t = torch.tensor(s, dtype=torch.float32, device=self.device).unsqueeze(0)
+                s_t = torch.tensor(
+                    s, dtype=torch.float32, device=self.device
+                ).unsqueeze(0)
                 logits, value = self.net(s_t)
                 prob = torch.sigmoid(logits)
                 # sample
                 m = torch.distributions.Bernoulli(probs=prob)
                 a = m.sample().item()
-                logp = m.log_prob(torch.tensor(a, device=self.device, dtype=torch.float32))
+                logp = m.log_prob(
+                    torch.tensor(a, device=self.device, dtype=torch.float32)
+                )
 
                 s_next, r, done, _ = env.step(int(a))
 
@@ -74,7 +92,13 @@ try:
             advs = []
             gae = 0.0
             for i in reversed(range(len(rewards))):
-                delta = rewards[i] + self.gamma * (last_val if i == len(rewards)-1 else values[i+1]) * (1 - dones[i]) - values[i]
+                delta = (
+                    rewards[i]
+                    + self.gamma
+                    * (last_val if i == len(rewards) - 1 else values[i + 1])
+                    * (1 - dones[i])
+                    - values[i]
+                )
                 gae = delta + self.gamma * self.lam * (1 - dones[i]) * gae
                 advs.insert(0, gae)
 
@@ -82,28 +106,40 @@ try:
 
             # convert to tensors
             batch = {
-                'states': torch.tensor(np.array(states), dtype=torch.float32, device=self.device),
-                'actions': torch.tensor(actions, dtype=torch.float32, device=self.device).unsqueeze(1),
-                'logps': torch.tensor(logps, dtype=torch.float32, device=self.device).unsqueeze(1),
-                'returns': torch.tensor(returns, dtype=torch.float32, device=self.device).unsqueeze(1),
-                'advs': torch.tensor(advs, dtype=torch.float32, device=self.device).unsqueeze(1),
+                "states": torch.tensor(
+                    np.array(states), dtype=torch.float32, device=self.device
+                ),
+                "actions": torch.tensor(
+                    actions, dtype=torch.float32, device=self.device
+                ).unsqueeze(1),
+                "logps": torch.tensor(
+                    logps, dtype=torch.float32, device=self.device
+                ).unsqueeze(1),
+                "returns": torch.tensor(
+                    returns, dtype=torch.float32, device=self.device
+                ).unsqueeze(1),
+                "advs": torch.tensor(
+                    advs, dtype=torch.float32, device=self.device
+                ).unsqueeze(1),
             }
             # normalize advantages
-            batch['advs'] = (batch['advs'] - batch['advs'].mean()) / (batch['advs'].std() + 1e-8)
+            batch["advs"] = (batch["advs"] - batch["advs"].mean()) / (
+                batch["advs"].std() + 1e-8
+            )
             return batch
 
         def ppo_update(self, batch):
-            N = batch['states'].size(0)
+            N = batch["states"].size(0)
             idxs = np.arange(N)
             for _ in range(self.ppo_epochs):
                 np.random.shuffle(idxs)
                 for start in range(0, N, self.batch_size):
-                    mb_idx = idxs[start:start+self.batch_size]
-                    s = batch['states'][mb_idx]
-                    a = batch['actions'][mb_idx]
-                    old_logp = batch['logps'][mb_idx]
-                    ret = batch['returns'][mb_idx]
-                    adv = batch['advs'][mb_idx]
+                    mb_idx = idxs[start : start + self.batch_size]
+                    s = batch["states"][mb_idx]
+                    a = batch["actions"][mb_idx]
+                    old_logp = batch["logps"][mb_idx]
+                    ret = batch["returns"][mb_idx]
+                    adv = batch["advs"][mb_idx]
 
                     logits, value = self.net(s)
                     prob = torch.sigmoid(logits)
@@ -113,12 +149,19 @@ try:
 
                     ratio = torch.exp(new_logp - old_logp)
                     surr1 = ratio * adv
-                    surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * adv
+                    surr2 = (
+                        torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps)
+                        * adv
+                    )
                     policy_loss = -torch.min(surr1, surr2).mean()
 
                     value_loss = F.mse_loss(value, ret)
 
-                    loss = policy_loss + self.vf_coef * value_loss - self.ent_coef * entropy
+                    loss = (
+                        policy_loss
+                        + self.vf_coef * value_loss
+                        - self.ent_coef * entropy
+                    )
 
                     self.opt.zero_grad()
                     loss.backward()
@@ -129,24 +172,29 @@ try:
 
         def save(self, step):
             path = os.path.join(self.save_dir, f"checkpoint_{step}.pt")
-            torch.save({'model_state': self.net.state_dict(), 'optimizer': self.opt.state_dict()}, path)
+            torch.save(
+                {
+                    "model_state": self.net.state_dict(),
+                    "optimizer": self.opt.state_dict(),
+                },
+                path,
+            )
             return path
 
         def train(self, total_timesteps=20000, env=None, log_interval=1):
             env = env or GameEnv()
             timesteps = 0
             it = 0
-            ep_rewards = deque(maxlen=100)
             while timesteps < total_timesteps:
                 batch = self.collect_trajectory(env)
-                timesteps += batch['states'].size(0)
+                timesteps += batch["states"].size(0)
                 loss, ploss, vloss, ent = self.ppo_update(batch)
                 it += 1
                 # log
-                self.writer.add_scalar('loss/total', loss, it)
-                self.writer.add_scalar('loss/policy', ploss, it)
-                self.writer.add_scalar('loss/value', vloss, it)
-                self.writer.add_scalar('policy/entropy', ent, it)
+                self.writer.add_scalar("loss/total", loss, it)
+                self.writer.add_scalar("loss/policy", ploss, it)
+                self.writer.add_scalar("loss/value", vloss, it)
+                self.writer.add_scalar("policy/entropy", ent, it)
                 if it % 10 == 0:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")

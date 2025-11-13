@@ -1,8 +1,9 @@
 """Trainer harness: runs episodes using GameEnv and an agent instance.
 This is intentionally minimal so it can run as a smoke test without heavy deps.
 """
-from game.environment import GameEnv
+
 from agents.ppo_agent import PPOAgent
+from game.environment import GameEnv
 
 
 class Trainer:
@@ -29,6 +30,7 @@ class Trainer:
             n += 1
         return results
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     t = Trainer(episodes=3)
     t.run()

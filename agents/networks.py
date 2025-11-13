@@ -2,8 +2,8 @@
 Tries to provide a PyTorch implementation if torch is available.
 Otherwise provides a tiny numpy-based fallback interface used by trainer/tests.
 """
+
 try:
-    import torch
     import torch.nn as nn
     import torch.nn.functional as F
 
