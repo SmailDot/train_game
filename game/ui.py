@@ -9,6 +9,7 @@ import pygame
 
 from game.environment import GameEnv
 from agents.ppo_agent import PPOAgent
+from game.training_window import TrainingWindow
 
 
 class GameUI:
@@ -70,19 +71,23 @@ class GameUI:
         # human jump flag (avoid double-stepping in key handler)
         self.human_jump = False
 
-        # UI layout
-        self.play_area = pygame.Rect(0, 0, int(self.WIDTH * 0.75), self.HEIGHT)
+        # UI layout - 擴大遊玩區域
+        self.play_area = pygame.Rect(0, 0, int(self.WIDTH * 0.85), self.HEIGHT)
         self.panel = pygame.Rect(self.play_area.right, 0, self.WIDTH - self.play_area.right, self.HEIGHT)
 
-        # buttons inside panel
-        self.btn_human = pygame.Rect(self.panel.left + 20, 40, self.panel.width - 40, 50)
-        self.btn_ai = pygame.Rect(self.panel.left + 20, 110, self.panel.width - 40, 50)
-        self.btn_board = pygame.Rect(self.panel.left + 20, 180, self.panel.width - 40, 50)
+        # buttons inside panel - 調整間距
+        btn_width = self.panel.width - 30
+        self.btn_human = pygame.Rect(self.panel.left + 15, 50, btn_width, 55)
+        self.btn_ai = pygame.Rect(self.panel.left + 15, 120, btn_width, 55)
+        self.btn_board = pygame.Rect(self.panel.left + 15, 190, btn_width, 55)
         
         # Game state flags
         self.paused = False  # ESC 暫停狀態
         self.game_over = False  # 遊戲結束狀態
         self.show_pause_menu = False  # 顯示暫停選單
+        
+        # 訓練視覺化視窗（AI 模式時使用）
+        self.training_window = None
 
         # leaderboard: list of (name, score), newest entries appended; keep top scores
         self.leaderboard = [("AgentA", 10), ("AgentB", 7), ("Human", 3)]
@@ -144,120 +149,52 @@ class GameUI:
         pygame.draw.circle(self.screen, (255, 200, 50), (ball_x, ball_y), 12)
 
     def draw_panel(self):
+        """繪製簡化的側邊面板（只顯示基本信息）"""
         pygame.draw.rect(self.screen, (18, 18, 22), self.panel)
 
-        # buttons
-        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_human)
-        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_ai)
-        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_board)
+        # buttons - 按鈕文字置中
+        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_human, border_radius=8)
+        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_ai, border_radius=8)
+        pygame.draw.rect(self.screen, (70, 70, 80), self.btn_board, border_radius=8)
 
         h_text = self.large_font.render("人類遊玩", True, (240, 240, 240))
         ai_text = self.large_font.render("AI 遊玩", True, (240, 240, 240))
         b_text = self.large_font.render("排行榜", True, (240, 240, 240))
 
-        self.screen.blit(h_text, (self.btn_human.left + 10, self.btn_human.top + 10))
-        self.screen.blit(ai_text, (self.btn_ai.left + 10, self.btn_ai.top + 10))
-        self.screen.blit(b_text, (self.btn_board.left + 10, self.btn_board.top + 10))
+        # 置中顯示按鈕文字
+        self.screen.blit(h_text, (self.btn_human.centerx - h_text.get_width() // 2, 
+                                   self.btn_human.centery - h_text.get_height() // 2))
+        self.screen.blit(ai_text, (self.btn_ai.centerx - ai_text.get_width() // 2,
+                                    self.btn_ai.centery - ai_text.get_height() // 2))
+        self.screen.blit(b_text, (self.btn_board.centerx - b_text.get_width() // 2,
+                                   self.btn_board.centery - b_text.get_height() // 2))
 
-        # mode indicator & n
+        # mode indicator & current score - 使用更大的間距
+        info_y = 270
         mode_name = "人類" if self.mode == "Human" else ("AI" if self.mode == "AI" else "選單")
-        mode_text = self.font.render(f"模式: {mode_name}", True, (200, 200, 200))
-        n_text = self.font.render(f"訓練回合: {self.n}", True, (200, 200, 200))
-        self.screen.blit(mode_text, (self.panel.left + 20, 260))
-        self.screen.blit(n_text, (self.panel.left + 20, 285))
-        # current score
-        score_text = self.font.render(f"本局分數: {int(self.current_score)}", True, (200, 200, 200))
-        self.screen.blit(score_text, (self.panel.left + 20, 310))
+        mode_text = self.large_font.render(f"模式", True, (150, 150, 160))
+        mode_value = self.large_font.render(f"{mode_name}", True, (220, 220, 230))
+        self.screen.blit(mode_text, (self.panel.left + 20, info_y))
+        self.screen.blit(mode_value, (self.panel.left + 20, info_y + 35))
+        
+        # current score - 更醒目的分數顯示
+        score_y = info_y + 100
+        score_label = self.large_font.render("本局分數", True, (150, 150, 160))
+        score_value = self.large_font.render(f"{int(self.current_score)}", True, (100, 255, 100))
+        self.screen.blit(score_label, (self.panel.left + 20, score_y))
+        self.screen.blit(score_value, (self.panel.left + 20, score_y + 35))
 
-        # NN placeholder (simple rectangle with title)
-        nn_rect = pygame.Rect(self.panel.left + 20, 345, self.panel.width - 40, 160)
-        pygame.draw.rect(self.screen, (50, 50, 60), nn_rect)
-        nn_title = self.font.render("神經網路權重熱力圖", True, (200, 200, 200))
-        self.screen.blit(nn_title, (nn_rect.left + 8, nn_rect.top + 8))
-
-        # try to draw a real weight heatmap if agent/net provides it, otherwise fallback to a fake heatmap
-        w = None
-        try:
-            if self.agent is not None and hasattr(self.agent, "net") and hasattr(self.agent.net, "get_weight_matrix"):
-                w = self.agent.net.get_weight_matrix()
-            elif hasattr(self.env, "net") and hasattr(self.env.net, "get_weight_matrix"):
-                w = self.env.net.get_weight_matrix()
-        except Exception:
-            w = None
-
-        # prepare grid dims
-        grid_rows = 4
-        grid_cols = 8
-        cell_w = (nn_rect.width - 16) // grid_cols
-        cell_h = (nn_rect.height - 40) // grid_rows
-
-        if w is not None:
-            try:
-                import numpy as _np
-
-                arr = _np.array(w)
-                # If 1D, expand to 2D
-                if arr.ndim == 1:
-                    arr = arr.reshape(1, -1)
-
-                # Resize or pad/crop to grid_rows x grid_cols
-                # Simple approach: scale arr to (grid_rows, grid_cols) via averaging/padding
-                # If arr is smaller, pad with zeros; if larger, crop
-                r, c = arr.shape
-                target = _np.zeros((grid_rows, grid_cols), dtype=_np.float32)
-                rr = min(r, grid_rows)
-                cc = min(c, grid_cols)
-                target[:rr, :cc] = arr[:rr, :cc]
-
-                # normalize to 0..255
-                mn = target.min()
-                mx = target.max()
-                if mx - mn == 0:
-                    norm = _np.zeros_like(target)
-                else:
-                    norm = (target - mn) / (mx - mn)
-
-                for i in range(grid_rows):
-                    for j in range(grid_cols):
-                        v = float(norm[i, j])
-                        cval = int(40 + v * 215)
-                        pygame.draw.rect(
-                            self.screen,
-                            (cval, int(120 * (1 - v)), 200 - cval // 3),
-                            (
-                                nn_rect.left + 8 + j * cell_w,
-                                nn_rect.top + 36 + i * cell_h,
-                                cell_w - 2,
-                                cell_h - 2,
-                            ),
-                        )
-            except Exception:
-                w = None
-
-        if w is None:
-            # fallback fake heatmap (animated)
-            for i in range(grid_rows):
-                for j in range(grid_cols):
-                    v = (math.sin(i * 0.5 + j * 0.3 + self.n * 0.05) + 1) / 2
-                    c = int(80 + v * 160)
-                    pygame.draw.rect(
-                        self.screen,
-                        (c, 80, 200 - c // 2),
-                        (
-                            nn_rect.left + 8 + j * cell_w,
-                            nn_rect.top + 36 + i * cell_h,
-                            cell_w - 2,
-                            cell_h - 2,
-                        ),
-                    )
-
-        # Loss visualization area (below nn_rect) - 調整位置避免重疊
-        loss_rect = pygame.Rect(self.panel.left + 20, nn_rect.bottom + 10, self.panel.width - 40, 100)
-        pygame.draw.rect(self.screen, (30, 30, 36), loss_rect)
-        loss_title = self.font.render("訓練損失 (策略/價值/熵/總計)", True, (200, 200, 200))
-        self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
-
-        # If we're in Menu mode (not running), draw a simple start hint in play area
+        # leaderboard - 簡潔顯示
+        lb_top = score_y + 120
+        lb_title = self.large_font.render("排行榜 Top 5", True, (200, 200, 220))
+        self.screen.blit(lb_title, (self.panel.left + 20, lb_top))
+        
+        for idx, (name, score) in enumerate(self.leaderboard[:5]):
+            rank_text = f"{idx+1}. {name}: {score}"
+            t = self.font.render(rank_text, True, (180, 180, 200))
+            self.screen.blit(t, (self.panel.left + 25, lb_top + 40 + idx * 28))
+        
+        # 如果在選單模式，在遊玩區域顯示提示
         if not self.running:
             title = self.large_font.render("訓練遊戲", True, (240, 240, 240))
             hint = self.font.render("點擊「人類遊玩」或「AI 遊玩」開始", True, (200, 200, 200))
@@ -266,37 +203,6 @@ class GameUI:
             hint_x = self.play_area.left + (self.play_area.width // 2 - hint.get_width() // 2)
             self.screen.blit(title, (title_x, 100))
             self.screen.blit(hint, (hint_x, 150))
-
-        # show numeric latest loss values (if any)
-        with self._lock:
-            lm = dict(self.latest_metrics) if self.latest_metrics else {}
-
-        txt_y = loss_rect.top + 28
-        try:
-            pol = f"策略: {lm.get('policy_loss'):.4f}" if lm.get('policy_loss') is not None else "策略: -"
-            val = f"價值: {lm.get('value_loss'):.4f}" if lm.get('value_loss') is not None else "價值: -"
-            ent = f"熵: {lm.get('entropy'):.4f}" if lm.get('entropy') is not None else "熵: -"
-            tot = f"總計: {lm.get('loss'):.4f}" if lm.get('loss') is not None else "總計: -"
-        except Exception:
-            pol = val = ent = tot = "-"
-
-        # 縮小字體顯示避免重疊
-        small_font = pygame.font.SysFont(None, 22)
-        self.screen.blit(small_font.render(pol, True, (200, 180, 180)), (loss_rect.left + 8, txt_y))
-        self.screen.blit(small_font.render(val, True, (180, 220, 180)), (loss_rect.left + 90, txt_y))
-        self.screen.blit(small_font.render(ent, True, (180, 180, 220)), (loss_rect.left + 8, txt_y + 20))
-        self.screen.blit(small_font.render(tot, True, (220, 220, 140)), (loss_rect.left + 90, txt_y + 20))
-
-        # draw simple multi-series plot (below numeric summary)
-        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 68, loss_rect.width - 16, loss_rect.height - 76)
-
-        # leaderboard - 調整位置避免重疊
-        lb_top = loss_rect.bottom + 10
-        lb_title = self.font.render("排行榜:", True, (220, 220, 220))
-        self.screen.blit(lb_title, (self.panel.left + 20, lb_top))
-        for idx, (name, score) in enumerate(self.leaderboard[:5]):
-            t = self.font.render(f"{idx+1}. {name} - {score}", True, (200, 200, 200))
-            self.screen.blit(t, (self.panel.left + 20, lb_top + 24 + idx * 22))
 
     def draw_game_over_dialog(self):
         """繪製遊戲結束對話框"""
@@ -398,6 +304,10 @@ class GameUI:
                 self.game_over = False
                 self.running = False
                 self.mode = "Menu"
+                # 關閉訓練視窗（如果有）
+                if self.training_window is not None:
+                    self.training_window.stop()
+                    self.training_window = None
                 return self.env.reset()
             return None
         
@@ -413,6 +323,10 @@ class GameUI:
                 self.paused = False
                 self.running = False
                 self.mode = "Menu"
+                # 關閉訓練視窗（如果有）
+                if self.training_window is not None:
+                    self.training_window.stop()
+                    self.training_window = None
                 return self.env.reset()
             return None
         
@@ -438,6 +352,12 @@ class GameUI:
                     self.agent = PPOAgent()
                 except Exception:
                     self.agent = None
+            
+            # 啟動訓練視覺化視窗（獨立視窗）
+            if self.training_window is None:
+                self.training_window = TrainingWindow()
+                self.training_window.start()
+            
             # Reset environment and return the new state
             return self.env.reset()
         if self.btn_board.collidepoint(pos):
@@ -592,6 +512,10 @@ class GameUI:
             except Exception:
                 # keep training robust to odd metric values
                 pass
+        
+        # 更新訓練視覺化視窗（如果已啟動）
+        if self.training_window is not None:
+            self.training_window.update_data(metrics)
 
     def start_trainer(self, trainer, **train_kwargs):
         """Start trainer.train(...) in a background daemon thread and wire metrics to UI.update_losses.
@@ -730,6 +654,11 @@ class GameUI:
             pygame.display.flip()
             self.clock.tick(self.FPS)
 
+        # 清理：關閉訓練視覺化視窗
+        if self.training_window is not None:
+            self.training_window.stop()
+            self.training_window = None
+        
         pygame.quit()
         sys.exit()
 

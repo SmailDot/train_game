@@ -135,7 +135,7 @@ class GameEnv:
             self.obstacles.append([spawn_x, gap_top, gap_bottom, False])
             break  # Only spawn one per step
 
-        reward = -0.1  # time penalty
+        reward = 0.0  # 移除時間懲罰，讓分數更直觀
         done = False
         ball_margin = 15.0  # 球半徑 12 + 小容差
 
