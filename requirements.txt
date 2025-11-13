@@ -1,8 +1,12 @@
-numpy
-pytest
+numpy==1.26.4
+pytest==7.4.2
+black==24.1.0
+ruff==0.13.1
+isort==5.11.4
+pre-commit==3.4.0
 # Optional (install if you plan to run the PyTorch PPO implementation):
 # For CPU-only, install the CPU wheel for your platform. Example (Windows):
 # pip install torch --index-url https://download.pytorch.org/whl/cpu
-torch
-tensorboard
-pygame
+torch==2.2.0
+tensorboard==2.16.0
+pygame==2.1.3
