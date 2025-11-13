@@ -14,16 +14,18 @@ class GameEnv:
     ScreenHeight = 200
     MaxDist = 300
     MaxAbsVel = 20.0
-    # horizontal scroll speed (pixels per step)
+    # horizontal scroll speed (pixels per step) base value
     ScrollSpeed = 2.0
+    # how much to increase scroll per passed obstacle (fraction per pass)
+    ScrollIncreasePerPass = 0.02
 
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
         self.reset()
 
     def reset(self):  # noqa: C901
-        # ball
-        self.y = self.ScreenHeight * 0.5
+        # ball: spawn at a random vertical position (not too close to edges)
+        self.y = self.rng.uniform(20.0, float(self.ScreenHeight - 20.0))
         self.vy = 0.0
         # one obstacle ahead (spawn at semi-random distance)
         self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
@@ -37,6 +39,8 @@ class GameEnv:
         self.prev_ob_x = self.ob_x
         # track cumulative score for the current episode
         self.episode_score = 0.0
+        # number of passed obstacles (used to scale scroll/difficulty)
+        self.passed_count = 0
         return self._get_state()
 
     def _get_state(self):
@@ -71,9 +75,11 @@ class GameEnv:
         self.vy = max(min(self.vy, self.MaxAbsVel), -self.MaxAbsVel)
         self.y += self.vy * dt
 
-        # move obstacle left by configured scroll speed
+        # compute dynamic scroll speed that increases with passed obstacles
+        current_scroll = self.ScrollSpeed * (1.0 + self.passed_count * self.ScrollIncreasePerPass)
+        # move obstacle left by current scroll speed
         self.prev_ob_x = self.ob_x
-        self.ob_x -= self.ScrollSpeed
+        self.ob_x -= current_scroll
         if self.ob_x < -50:
             # spawn new obstacle at a random distance ahead with random gap
             self.ob_x = self.rng.uniform(180.0, float(self.MaxDist))
@@ -92,6 +98,11 @@ class GameEnv:
         if self.prev_ob_x > 0 and self.ob_x <= 0:
             if self.gap_top + 5 < self.y < self.gap_bottom - 5:
                 reward += 5.0
+                # increase passed counter (difficulty)
+                try:
+                    self.passed_count += 1
+                except Exception:
+                    self.passed_count = 0
 
         # collision / out-of-bounds (top/bottom)
         # hitting ceiling or floor is failure

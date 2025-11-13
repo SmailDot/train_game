@@ -79,23 +79,34 @@ class GameUI:
         pygame.draw.rect(self.screen, (20, 20, 30), self.play_area)
 
         # map env coords to pixels
-        s_y = state[0]  # normalized y
-        y_px = int(s_y * self.HEIGHT)
+        # state[0] is normalized y (0..1), map to play_area height
+        # Note: env uses ScreenHeight=200, but UI may have different height
+        s_y = state[0]  # normalized y [0,1]
+        y_px = int(s_y * self.env.ScreenHeight)  # map back to env's coordinate system
+        # clamp to visible range
+        y_px = max(10, min(y_px, self.env.ScreenHeight - 10))
 
-        # ball
+        # ball: fixed x position at 20% of play area width
         ball_x = int(self.play_area.width * 0.2)
         ball_y = y_px
         pygame.draw.circle(self.screen, (255, 200, 50), (ball_x, ball_y), 12)
 
-        # obstacle: use normalized x (state[2]) back to px within play_area
-        ob_x_norm = state[2]
-        ob_x_px = int(self.play_area.right - ob_x_norm * self.play_area.width)
-        gap_top = int(state[3] * self.HEIGHT)
-        gap_bottom = int(state[4] * self.HEIGHT)
+        # obstacle: state[2] is normalized obstacle x [0,1] where 1=MaxDist, 0=at player
+        # We need to map this to screen coordinates
+        # When ob_x=MaxDist (far right), normalized=1, should appear at right edge of play area
+        # When ob_x=0 (at player), normalized=0, should appear at ball_x position
+        ob_x_norm = state[2]  # 0..1
+        # Map: normalized 0 -> ball_x, normalized 1 -> play_area.width
+        ob_x_px = int(ball_x + ob_x_norm * (self.play_area.width - ball_x))
+        
+        # gap coordinates: already normalized to [0,1] by env
+        gap_top_px = int(state[3] * self.env.ScreenHeight)
+        gap_bottom_px = int(state[4] * self.env.ScreenHeight)
 
-        # draw top and bottom rects
-        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, 0, 40, gap_top))
-        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, gap_bottom, 40, self.HEIGHT - gap_bottom))
+        # draw obstacle: top pillar and bottom pillar with gap in between
+        obstacle_width = 40
+        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, 0, obstacle_width, gap_top_px))
+        pygame.draw.rect(self.screen, (10, 120, 10), (ob_x_px, gap_bottom_px, obstacle_width, self.env.ScreenHeight - gap_bottom_px))
 
     def draw_panel(self):
         pygame.draw.rect(self.screen, (18, 18, 22), self.panel)
@@ -216,12 +227,15 @@ class GameUI:
         loss_title = self.font.render("Losses (policy / value / entropy / total)", True, (200, 200, 200))
         self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
 
-        # If we're in Menu mode (not running), draw a simple start hint
+        # If we're in Menu mode (not running), draw a simple start hint in play area
         if not self.running:
             title = self.large_font.render("Train Game", True, (240, 240, 240))
             hint = self.font.render("Click 'Human Play' or 'AI Play' to start", True, (200, 200, 200))
-            self.screen.blit(title, (self.play_area.width // 2 - 80, 40))
-            self.screen.blit(hint, (self.play_area.width // 2 - 160, 80))
+            # Center in play area
+            title_x = self.play_area.left + (self.play_area.width // 2 - title.get_width() // 2)
+            hint_x = self.play_area.left + (self.play_area.width // 2 - hint.get_width() // 2)
+            self.screen.blit(title, (title_x, 100))
+            self.screen.blit(hint, (hint_x, 150))
 
         # show numeric latest loss values (if any)
         with self._lock:
@@ -259,12 +273,14 @@ class GameUI:
             self.mode = "Human"
             self.running = True
             self.agent = None
+            self.current_score = 0.0
             self.env.reset()
             return
         if not self.running and self.btn_ai.collidepoint(pos):
             self.selected_mode = "AI"
             self.mode = "AI"
             self.running = True
+            self.current_score = 0.0
             # ensure agent exists (try to instantiate fallback if missing)
             if self.agent is None:
                 try:
@@ -476,12 +492,13 @@ class GameUI:
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     self.handle_click(event.pos)
                 elif event.type == pygame.KEYDOWN:
-                    if self.mode == "Human" and event.key == pygame.K_SPACE:
+                    if self.running and self.mode == "Human" and event.key == pygame.K_SPACE:
                         # queue a human jump for the main step
                         self.human_jump = True
-            # if not running (menu), only render and continue
+            
+            # if not running (menu mode), only render and wait for user to click start
             if not self.running:
-                # render only
+                # render only - don't step the environment
                 self.screen.fill(self.BG_COLOR)
                 self.draw_playfield(s)
                 self.draw_panel()
