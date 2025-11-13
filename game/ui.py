@@ -54,6 +54,11 @@ class GameUI:
         self.btn_human = pygame.Rect(self.panel.left + 20, 40, self.panel.width - 40, 50)
         self.btn_ai = pygame.Rect(self.panel.left + 20, 110, self.panel.width - 40, 50)
         self.btn_board = pygame.Rect(self.panel.left + 20, 180, self.panel.width - 40, 50)
+        
+        # Game state flags
+        self.paused = False  # ESC 暫停狀態
+        self.game_over = False  # 遊戲結束狀態
+        self.show_pause_menu = False  # 顯示暫停選單
 
         # leaderboard: list of (name, score), newest entries appended; keep top scores
         self.leaderboard = [("AgentA", 10), ("AgentB", 7), ("Human", 3)]
@@ -122,27 +127,28 @@ class GameUI:
         pygame.draw.rect(self.screen, (70, 70, 80), self.btn_ai)
         pygame.draw.rect(self.screen, (70, 70, 80), self.btn_board)
 
-        h_text = self.large_font.render("Human Play", True, (240, 240, 240))
-        ai_text = self.large_font.render("AI Play", True, (240, 240, 240))
-        b_text = self.large_font.render("Leaderboard", True, (240, 240, 240))
+        h_text = self.large_font.render("人類遊玩", True, (240, 240, 240))
+        ai_text = self.large_font.render("AI 遊玩", True, (240, 240, 240))
+        b_text = self.large_font.render("排行榜", True, (240, 240, 240))
 
         self.screen.blit(h_text, (self.btn_human.left + 10, self.btn_human.top + 10))
         self.screen.blit(ai_text, (self.btn_ai.left + 10, self.btn_ai.top + 10))
         self.screen.blit(b_text, (self.btn_board.left + 10, self.btn_board.top + 10))
 
         # mode indicator & n
-        mode_text = self.font.render(f"Mode: {self.mode}", True, (200, 200, 200))
-        n_text = self.font.render(f"目前訓練回合 n={self.n}", True, (200, 200, 200))
+        mode_name = "人類" if self.mode == "Human" else ("AI" if self.mode == "AI" else "選單")
+        mode_text = self.font.render(f"模式: {mode_name}", True, (200, 200, 200))
+        n_text = self.font.render(f"訓練回合: {self.n}", True, (200, 200, 200))
         self.screen.blit(mode_text, (self.panel.left + 20, 260))
-        self.screen.blit(n_text, (self.panel.left + 20, 290))
+        self.screen.blit(n_text, (self.panel.left + 20, 285))
         # current score
         score_text = self.font.render(f"本局分數: {int(self.current_score)}", True, (200, 200, 200))
-        self.screen.blit(score_text, (self.panel.left + 20, 320))
+        self.screen.blit(score_text, (self.panel.left + 20, 310))
 
         # NN placeholder (simple rectangle with title)
-        nn_rect = pygame.Rect(self.panel.left + 20, 340, self.panel.width - 40, 200)
+        nn_rect = pygame.Rect(self.panel.left + 20, 345, self.panel.width - 40, 160)
         pygame.draw.rect(self.screen, (50, 50, 60), nn_rect)
-        nn_title = self.font.render("Neural Net (weights heatmap placeholder)", True, (200, 200, 200))
+        nn_title = self.font.render("神經網路權重熱力圖", True, (200, 200, 200))
         self.screen.blit(nn_title, (nn_rect.left + 8, nn_rect.top + 8))
 
         # try to draw a real weight heatmap if agent/net provides it, otherwise fallback to a fake heatmap
@@ -221,22 +227,16 @@ class GameUI:
                         ),
                     )
 
-        # Export weights button
-        self.btn_export = pygame.Rect(self.panel.left + 20, nn_rect.top - 40, self.panel.width - 40, 28)
-        pygame.draw.rect(self.screen, (80, 60, 80), self.btn_export)
-        ex_text = self.font.render("Export weights to TensorBoard", True, (240, 240, 240))
-        self.screen.blit(ex_text, (self.btn_export.left + 8, self.btn_export.top + 4))
-
-        # Loss visualization area (below nn_rect)
-        loss_rect = pygame.Rect(self.panel.left + 20, nn_rect.bottom + 8, self.panel.width - 40, 120)
+        # Loss visualization area (below nn_rect) - 調整位置避免重疊
+        loss_rect = pygame.Rect(self.panel.left + 20, nn_rect.bottom + 10, self.panel.width - 40, 100)
         pygame.draw.rect(self.screen, (30, 30, 36), loss_rect)
-        loss_title = self.font.render("Losses (policy / value / entropy / total)", True, (200, 200, 200))
+        loss_title = self.font.render("訓練損失 (策略/價值/熵/總計)", True, (200, 200, 200))
         self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
 
         # If we're in Menu mode (not running), draw a simple start hint in play area
         if not self.running:
-            title = self.large_font.render("Train Game", True, (240, 240, 240))
-            hint = self.font.render("Click 'Human Play' or 'AI Play' to start", True, (200, 200, 200))
+            title = self.large_font.render("訓練遊戲", True, (240, 240, 240))
+            hint = self.font.render("點擊「人類遊玩」或「AI 遊玩」開始", True, (200, 200, 200))
             # Center in play area
             title_x = self.play_area.left + (self.play_area.width // 2 - title.get_width() // 2)
             hint_x = self.play_area.left + (self.play_area.width // 2 - hint.get_width() // 2)
@@ -249,30 +249,149 @@ class GameUI:
 
         txt_y = loss_rect.top + 28
         try:
-            pol = f"policy: {lm.get('policy_loss'):.4f}" if lm.get('policy_loss') is not None else "policy: -"
-            val = f"value: {lm.get('value_loss'):.4f}" if lm.get('value_loss') is not None else "value: -"
-            ent = f"entropy: {lm.get('entropy'):.4f}" if lm.get('entropy') is not None else "entropy: -"
-            tot = f"total: {lm.get('loss'):.4f}" if lm.get('loss') is not None else "total: -"
+            pol = f"策略: {lm.get('policy_loss'):.4f}" if lm.get('policy_loss') is not None else "策略: -"
+            val = f"價值: {lm.get('value_loss'):.4f}" if lm.get('value_loss') is not None else "價值: -"
+            ent = f"熵: {lm.get('entropy'):.4f}" if lm.get('entropy') is not None else "熵: -"
+            tot = f"總計: {lm.get('loss'):.4f}" if lm.get('loss') is not None else "總計: -"
         except Exception:
             pol = val = ent = tot = "-"
 
-        self.screen.blit(self.font.render(pol, True, (200, 180, 180)), (loss_rect.left + 8, txt_y))
-        self.screen.blit(self.font.render(val, True, (180, 220, 180)), (loss_rect.left + 8 + 140, txt_y))
-        self.screen.blit(self.font.render(ent, True, (180, 180, 220)), (loss_rect.left + 8 + 280, txt_y))
-        self.screen.blit(self.font.render(tot, True, (220, 220, 140)), (loss_rect.left + 8 + 420, txt_y))
+        # 縮小字體顯示避免重疊
+        small_font = pygame.font.SysFont(None, 22)
+        self.screen.blit(small_font.render(pol, True, (200, 180, 180)), (loss_rect.left + 8, txt_y))
+        self.screen.blit(small_font.render(val, True, (180, 220, 180)), (loss_rect.left + 90, txt_y))
+        self.screen.blit(small_font.render(ent, True, (180, 180, 220)), (loss_rect.left + 8, txt_y + 20))
+        self.screen.blit(small_font.render(tot, True, (220, 220, 140)), (loss_rect.left + 90, txt_y + 20))
 
         # draw simple multi-series plot (below numeric summary)
-        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 48, loss_rect.width - 16, loss_rect.height - 60)
+        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 68, loss_rect.width - 16, loss_rect.height - 76)
 
-        # leaderboard
-        lb_top = nn_rect.bottom + 12
-        lb_title = self.font.render("Leaderboard:", True, (220, 220, 220))
+        # leaderboard - 調整位置避免重疊
+        lb_top = loss_rect.bottom + 10
+        lb_title = self.font.render("排行榜:", True, (220, 220, 220))
         self.screen.blit(lb_title, (self.panel.left + 20, lb_top))
         for idx, (name, score) in enumerate(self.leaderboard[:5]):
             t = self.font.render(f"{idx+1}. {name} - {score}", True, (200, 200, 200))
             self.screen.blit(t, (self.panel.left + 20, lb_top + 24 + idx * 22))
 
+    def draw_game_over_dialog(self):
+        """繪製遊戲結束對話框"""
+        # 半透明遮罩
+        overlay = pygame.Surface((self.WIDTH, self.HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        
+        # 對話框
+        dialog_w, dialog_h = 400, 250
+        dialog_x = (self.WIDTH - dialog_w) // 2
+        dialog_y = (self.HEIGHT - dialog_h) // 2
+        dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_w, dialog_h)
+        pygame.draw.rect(self.screen, (40, 40, 50), dialog_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (100, 100, 120), dialog_rect, 3, border_radius=10)
+        
+        # 標題
+        title = self.large_font.render("遊戲結束", True, (255, 100, 100))
+        title_x = dialog_x + (dialog_w - title.get_width()) // 2
+        self.screen.blit(title, (title_x, dialog_y + 30))
+        
+        # 分數
+        score_text = self.large_font.render(f"最終分數: {int(self.current_score)}", True, (255, 255, 255))
+        score_x = dialog_x + (dialog_w - score_text.get_width()) // 2
+        self.screen.blit(score_text, (score_x, dialog_y + 80))
+        
+        # 按鈕
+        btn_continue = pygame.Rect(dialog_x + 50, dialog_y + 140, 130, 50)
+        btn_menu = pygame.Rect(dialog_x + 220, dialog_y + 140, 130, 50)
+        
+        pygame.draw.rect(self.screen, (80, 150, 80), btn_continue, border_radius=5)
+        pygame.draw.rect(self.screen, (150, 80, 80), btn_menu, border_radius=5)
+        
+        continue_text = self.font.render("繼續遊玩", True, (255, 255, 255))
+        menu_text = self.font.render("返回選單", True, (255, 255, 255))
+        
+        self.screen.blit(continue_text, (btn_continue.centerx - continue_text.get_width() // 2,
+                                        btn_continue.centery - continue_text.get_height() // 2))
+        self.screen.blit(menu_text, (btn_menu.centerx - menu_text.get_width() // 2,
+                                     btn_menu.centery - menu_text.get_height() // 2))
+        
+        return btn_continue, btn_menu
+    
+    def draw_pause_dialog(self):
+        """繪製暫停對話框"""
+        # 半透明遮罩
+        overlay = pygame.Surface((self.WIDTH, self.HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        
+        # 對話框
+        dialog_w, dialog_h = 400, 220
+        dialog_x = (self.WIDTH - dialog_w) // 2
+        dialog_y = (self.HEIGHT - dialog_h) // 2
+        dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_w, dialog_h)
+        pygame.draw.rect(self.screen, (40, 40, 50), dialog_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (100, 100, 120), dialog_rect, 3, border_radius=10)
+        
+        # 標題
+        title = self.large_font.render("遊戲暫停", True, (255, 255, 100))
+        title_x = dialog_x + (dialog_w - title.get_width()) // 2
+        self.screen.blit(title, (title_x, dialog_y + 30))
+        
+        # 提示
+        hint = self.font.render("按 ESC 繼續遊戲", True, (200, 200, 200))
+        hint_x = dialog_x + (dialog_w - hint.get_width()) // 2
+        self.screen.blit(hint, (hint_x, dialog_y + 80))
+        
+        # 按鈕
+        btn_resume = pygame.Rect(dialog_x + 50, dialog_y + 120, 130, 50)
+        btn_menu = pygame.Rect(dialog_x + 220, dialog_y + 120, 130, 50)
+        
+        pygame.draw.rect(self.screen, (80, 150, 80), btn_resume, border_radius=5)
+        pygame.draw.rect(self.screen, (150, 80, 80), btn_menu, border_radius=5)
+        
+        resume_text = self.font.render("繼續遊戲", True, (255, 255, 255))
+        menu_text = self.font.render("返回選單", True, (255, 255, 255))
+        
+        self.screen.blit(resume_text, (btn_resume.centerx - resume_text.get_width() // 2,
+                                       btn_resume.centery - resume_text.get_height() // 2))
+        self.screen.blit(menu_text, (btn_menu.centerx - menu_text.get_width() // 2,
+                                     btn_menu.centery - menu_text.get_height() // 2))
+        
+        return btn_resume, btn_menu
+
     def handle_click(self, pos):
+        # Handle game over dialog clicks
+        if self.game_over:
+            btn_continue, btn_menu = self.draw_game_over_dialog()  # Get button rects
+            if btn_continue.collidepoint(pos):
+                # 繼續遊玩 - 重置遊戲
+                self.game_over = False
+                self.current_score = 0.0
+                return self.env.reset()
+            elif btn_menu.collidepoint(pos):
+                # 返回選單
+                self.game_over = False
+                self.running = False
+                self.mode = "Menu"
+                return self.env.reset()
+            return None
+        
+        # Handle pause dialog clicks
+        if self.paused:
+            btn_resume, btn_menu = self.draw_pause_dialog()  # Get button rects
+            if btn_resume.collidepoint(pos):
+                # 繼續遊戲
+                self.paused = False
+                return None
+            elif btn_menu.collidepoint(pos):
+                # 返回選單
+                self.paused = False
+                self.running = False
+                self.mode = "Menu"
+                return self.env.reset()
+            return None
+        
         # If not running, these buttons start a run
         if not self.running and self.btn_human.collidepoint(pos):
             self.selected_mode = "Human"
@@ -280,6 +399,7 @@ class GameUI:
             self.running = True
             self.agent = None
             self.current_score = 0.0
+            self.game_over = False
             # Reset environment and return the new state
             return self.env.reset()
         if not self.running and self.btn_ai.collidepoint(pos):
@@ -287,6 +407,7 @@ class GameUI:
             self.mode = "AI"
             self.running = True
             self.current_score = 0.0
+            self.game_over = False
             # ensure agent exists (try to instantiate fallback if missing)
             if self.agent is None:
                 try:
@@ -295,9 +416,6 @@ class GameUI:
                     self.agent = None
             # Reset environment and return the new state
             return self.env.reset()
-        if hasattr(self, "btn_export") and self.btn_export.collidepoint(pos):
-            self.export_weights()
-            return
         if self.btn_board.collidepoint(pos):
             # toggle leaderboard maybe
             return
@@ -500,8 +618,11 @@ class GameUI:
                     if new_state is not None:
                         s = new_state
                 elif event.type == pygame.KEYDOWN:
-                    if self.running and self.mode == "Human" and event.key == pygame.K_SPACE:
-                        # queue a human jump for the main step
+                    # ESC 鍵暫停/取消暫停
+                    if event.key == pygame.K_ESCAPE and self.running and not self.game_over:
+                        self.paused = not self.paused
+                    # 空白鍵跳躍（只在遊戲進行中且未暫停時）
+                    elif self.running and self.mode == "Human" and event.key == pygame.K_SPACE and not self.paused and not self.game_over:
                         self.human_jump = True
             
             # if not running (menu mode), only render and wait for user to click start
@@ -510,6 +631,19 @@ class GameUI:
                 self.screen.fill(self.BG_COLOR)
                 self.draw_playfield(s)
                 self.draw_panel()
+                pygame.display.flip()
+                self.clock.tick(self.FPS)
+                continue
+            
+            # 如果遊戲暫停或結束，只渲染不更新
+            if self.paused or self.game_over:
+                self.screen.fill(self.BG_COLOR)
+                self.draw_playfield(s)
+                self.draw_panel()
+                if self.paused:
+                    self.draw_pause_dialog()
+                elif self.game_over:
+                    self.draw_game_over_dialog()
                 pygame.display.flip()
                 self.clock.tick(self.FPS)
                 continue
@@ -530,34 +664,45 @@ class GameUI:
                     action = 0
                 s, r, done, _ = self.env.step(action)
 
-            # update current score and leaderboard when episodes end
+            # update current score
             try:
                 self.current_score += float(r)
             except Exception:
                 pass
 
             if done:
-                name = "AI" if self.mode == "AI" else "Human"
-                # record final score (integer)
-                self.leaderboard.append((name, int(self.current_score)))
-                # keep top 10 entries sorted by score desc
-                self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
-                # persist leaderboard
-                try:
-                    self._save_scores()
-                except Exception:
-                    pass
-                # reset current score for next episode
-                self.current_score = 0.0
-
-            if done:
-                self.n += 1
-                s = self.env.reset()
+                # 在 Human 模式下顯示 Game Over 對話框
+                if self.mode == "Human":
+                    self.game_over = True
+                    # 記錄到排行榜
+                    name = "人類"
+                    self.leaderboard.append((name, int(self.current_score)))
+                    # keep top 10 entries sorted by score desc
+                    self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
+                    # persist leaderboard
+                    try:
+                        self._save_scores()
+                    except Exception:
+                        pass
+                else:
+                    # AI 模式自動重新開始
+                    name = "AI"
+                    self.leaderboard.append((name, int(self.current_score)))
+                    self.leaderboard = sorted(self.leaderboard, key=lambda x: x[1], reverse=True)[:10]
+                    try:
+                        self._save_scores()
+                    except Exception:
+                        pass
+                    self.current_score = 0.0
+                    self.n += 1
+                    s = self.env.reset()
 
             # render
             self.screen.fill(self.BG_COLOR)
             self.draw_playfield(s)
             self.draw_panel()
+            if self.game_over:
+                self.draw_game_over_dialog()
             pygame.display.flip()
             self.clock.tick(self.FPS)
 
