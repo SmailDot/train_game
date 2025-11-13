@@ -54,77 +54,102 @@ try:
             os.makedirs(save_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
 
-        def collect_trajectory(self, env: GameEnv, horizon=2048, stop_event=None):
-            """Collect a trajectory of length `horizon`.
+        def collect_trajectory(self, envs=None, horizon=2048, stop_event=None):
+            """Collect a `horizon`-length trajectory across one or more environments."""
 
-            Returns a tuple (batch, ep_rewards)
-            where batch is the usual tensor batch used by ppo_update and
-            ep_rewards is a list of episode total rewards encountered during
-            the horizon (may be empty).
-            """
-            states, actions, rewards, dones, values, logps = [], [], [], [], [], []
-            s = env.reset()
+            if envs is None:
+                envs = [GameEnv()]
+            elif isinstance(envs, GameEnv):
+                envs = [envs]
+            else:
+                envs = list(envs) or [GameEnv()]
+
+            states = [env.reset() for env in envs]
+            episode_returns = [0.0 for _ in envs]
+
+            batch_states = []
+            actions, rewards, dones, values, logps, next_values = [], [], [], [], [], []
             ep_rewards = []
-            cur_ep_reward = 0.0
+
             for t in range(horizon):
-                # allow early exit when requested
-                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                if (
+                    stop_event is not None
+                    and getattr(stop_event, "is_set", lambda: False)()
+                ):
                     break
+
+                env_idx = t % len(envs)
+                env = envs[env_idx]
+                s = states[env_idx]
+
                 s_t = torch.tensor(
                     s, dtype=torch.float32, device=self.device
                 ).unsqueeze(0)
                 logits, value = self.net(s_t)
                 prob = torch.sigmoid(logits)
-                # sample
-                m = torch.distributions.Bernoulli(probs=prob)
-                a = m.sample().item()
-                logp = m.log_prob(
-                    torch.tensor(a, device=self.device, dtype=torch.float32)
-                )
+                dist = torch.distributions.Bernoulli(probs=prob)
+                action_tensor = dist.sample()
+                action = int(action_tensor.item())
+                logp = dist.log_prob(action_tensor)
 
-                s_next, r, done, _ = env.step(int(a))
+                s_next, r, done, _ = env.step(action)
 
-                states.append(s)
-                actions.append(int(a))
+                batch_states.append(s)
+                actions.append(action)
                 rewards.append(r)
                 dones.append(done)
                 values.append(value.item())
                 logps.append(logp.item())
 
-                # track episode reward for reporting
-                cur_ep_reward += float(r)
+                episode_returns[env_idx] += float(r)
+
                 if done:
-                    ep_rewards.append(cur_ep_reward)
-                    cur_ep_reward = 0.0
-                    s = env.reset()
+                    ep_rewards.append(episode_returns[env_idx])
+                    episode_returns[env_idx] = 0.0
+                    states[env_idx] = env.reset()
+                    next_values.append(0.0)
                 else:
-                    s = s_next
+                    states[env_idx] = s_next
+                    with torch.no_grad():
+                        s_next_t = torch.tensor(
+                            s_next, dtype=torch.float32, device=self.device
+                        ).unsqueeze(0)
+                        _, next_value = self.net(s_next_t)
+                        next_values.append(float(next_value.item()))
 
-            # compute last value
-            s_t = torch.tensor(s, dtype=torch.float32, device=self.device).unsqueeze(0)
-            _, last_val = self.net(s_t)
-            last_val = last_val.item()
+            if not batch_states:
+                empty = torch.empty((0, 5), dtype=torch.float32, device=self.device)
+                zero = torch.empty((0, 1), dtype=torch.float32, device=self.device)
+                return (
+                    {
+                        "states": empty,
+                        "actions": zero,
+                        "logps": zero,
+                        "returns": zero,
+                        "advs": zero,
+                    },
+                    ep_rewards,
+                )
 
-            # compute advantages via GAE
+            if len(next_values) < len(rewards):
+                next_values.extend([0.0] * (len(rewards) - len(next_values)))
+
             advs = []
             gae = 0.0
             for i in reversed(range(len(rewards))):
                 delta = (
                     rewards[i]
-                    + self.gamma
-                    * (last_val if i == len(rewards) - 1 else values[i + 1])
-                    * (1 - dones[i])
+                    + self.gamma * next_values[i] * (1 - dones[i])
                     - values[i]
                 )
                 gae = delta + self.gamma * self.lam * (1 - dones[i]) * gae
                 advs.insert(0, gae)
 
-            returns = [a + v for a, v in zip(advs, values)]
+            returns = [adv + val for adv, val in zip(advs, values)]
 
-            # convert to tensors
             batch = {
                 "states": torch.tensor(
-                    np.array(states), dtype=torch.float32, device=self.device
+                    np.array(batch_states), dtype=torch.float32, device=self.device
                 ),
                 "actions": torch.tensor(
                     actions, dtype=torch.float32, device=self.device
@@ -139,10 +164,11 @@ try:
                     advs, dtype=torch.float32, device=self.device
                 ).unsqueeze(1),
             }
-            # normalize advantages
+
             batch["advs"] = (batch["advs"] - batch["advs"].mean()) / (
                 batch["advs"].std() + 1e-8
             )
+
             return batch, ep_rewards
 
         def ppo_update(self, batch):
@@ -192,28 +218,53 @@ try:
             torch.save(
                 {
                     "model_state": self.net.state_dict(),
-                    "optimizer": self.opt.state_dict(),
+                    "optimizer_state": self.opt.state_dict(),
                 },
                 path,
             )
             return path
 
-        def train(self, total_timesteps=20000, env=None, log_interval=1, metrics_callback=None, stop_event=None):
+        def train(
+            self,
+            total_timesteps=None,
+            env=None,
+            envs=None,
+            log_interval=1,
+            metrics_callback=None,
+            stop_event=None,
+            initial_iteration=0,
+        ):
             """Main training loop.
 
             metrics_callback: optional callable(metrics: dict) called after each
             PPO update with keys: it, loss, policy_loss, value_loss, entropy,
             timesteps, mean_reward, episode_count
             """
-            env = env or GameEnv()
+            if envs is not None:
+                env_list = list(envs) or [GameEnv()]
+            elif env is not None:
+                env_list = env if isinstance(env, (list, tuple)) else [env]
+            else:
+                env_list = [GameEnv()]
+
+            env_list = [e if isinstance(e, GameEnv) else GameEnv() for e in env_list]
+
             timesteps = 0
-            it = 0
-            while timesteps < total_timesteps:
+            it = initial_iteration
+
+            while True:
                 # honor external stop request
-                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                if (
+                    stop_event is not None
+                    and getattr(stop_event, "is_set", lambda: False)()
+                ):
                     break
 
-                batch, ep_rewards = self.collect_trajectory(env, stop_event=stop_event)
+                batch, ep_rewards = self.collect_trajectory(
+                    env_list, stop_event=stop_event
+                )
+                if batch["states"].numel() == 0:
+                    continue
                 timesteps += batch["states"].size(0)
                 loss, ploss, vloss, ent = self.ppo_update(batch)
                 it += 1
@@ -249,8 +300,14 @@ try:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")
 
+                if total_timesteps is not None and timesteps >= total_timesteps:
+                    break
+
                 # allow stopping after update
-                if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                if (
+                    stop_event is not None
+                    and getattr(stop_event, "is_set", lambda: False)()
+                ):
                     break
 
             self.writer.close()

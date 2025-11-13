@@ -10,5 +10,6 @@ def test_collision_with_obstacle():
     env.y = env.gap_top - 20.0
     s, r, done, _ = env.step(0)
     assert done is True
-    # collision penalty changed to -5 (plus small time penalty), so expect a negative small value
+    # collision penalty changed to -5 (plus small time penalty)
+    # we expect a moderately negative reward here
     assert r <= -5.0

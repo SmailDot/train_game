@@ -1,274 +1,443 @@
+﻿"""Utility for displaying a lightweight PPO training dashboard in a side window.
+
+The dashboard runs in a dedicated process so that the primary Pygame window
+remains responsive.  Metrics and optional network weight snapshots flow through
+an inter-process queue.
 """
-獨立的訓練視覺化視窗
-顯示神經網路結構和 Loss Function 圖表
-"""
-import pygame
-import math
-import threading
-from typing import Optional, Dict, List
+
+from __future__ import annotations
+
+import os
+import queue
+from dataclasses import dataclass
+from multiprocessing import Event, Process, Queue
+from typing import Dict, Iterable, List, Optional
+
 import numpy as np
+
+_MAX_HISTORY = 200
+
+
+@dataclass
+class _Payload:
+    metrics: Dict
+    weights: Optional[np.ndarray]
+
+
+def _prepare_fonts(pygame):
+    fonts = {}
+    candidates = [
+        "microsoftyahei",
+        "microsoftyaheimicrosoftyaheiui",
+        "microsoftyaheiui",
+        "simhei",
+        "arial",
+    ]
+    for name in candidates:
+        try:
+            fonts["body"] = pygame.font.SysFont(name, 20)
+            fonts["large"] = pygame.font.SysFont(name, 28)
+            fonts["title"] = pygame.font.SysFont(name, 32)
+            test = fonts["body"].render("測試", True, (255, 255, 255))
+            if test.get_width() > 0:
+                break
+        except Exception:
+            continue
+    if "body" not in fonts:
+        fonts["body"] = pygame.font.Font(None, 20)
+        fonts["large"] = pygame.font.Font(None, 28)
+        fonts["title"] = pygame.font.Font(None, 32)
+    return fonts
+
+
+def _limit_history(histories: Dict[str, list], steps: Optional[list] = None) -> None:
+    overflow = 0
+    for series in histories.values():
+        overflow = max(overflow, len(series) - _MAX_HISTORY)
+    if steps is not None:
+        overflow = max(overflow, len(steps) - _MAX_HISTORY)
+    if overflow > 0:
+        for series in histories.values():
+            if overflow >= len(series):
+                series.clear()
+            else:
+                del series[:overflow]
+        if steps is not None:
+            if overflow >= len(steps):
+                steps.clear()
+            else:
+                del steps[:overflow]
+
+
+def _update_histories(histories: Dict[str, list], metrics: Dict, steps: list) -> None:
+    key_map = {
+        "policy": "policy_loss",
+        "value": "value_loss",
+        "entropy": "entropy",
+        "total": "loss",
+    }
+    appended = False
+    for series_name, metric_key in key_map.items():
+        value = metrics.get(metric_key)
+        if value is None:
+            continue
+        try:
+            histories.setdefault(series_name, []).append(float(value))
+            appended = True
+        except Exception:
+            continue
+    if appended:
+        iteration = metrics.get("it")
+        if iteration is None:
+            try:
+                iteration = steps[-1] + 1
+            except Exception:
+                iteration = len(histories.get("total", []))
+        try:
+            steps.append(int(iteration))
+        except Exception:
+            steps.append(steps[-1] + 1 if steps else 0)
+    _limit_history(histories, steps)
+
+
+def _draw_network(
+    surface, fonts, iteration: int, weight_matrix: Optional[np.ndarray]
+) -> int:
+    import pygame
+
+    width, height = surface.get_size()
+    margin = 40
+
+    title = fonts["title"].render(
+        f"神經網路（第 {iteration} 次更新）", True, (100, 200, 255)
+    )
+    surface.blit(title, (margin, margin))
+
+    net_top = margin + title.get_height() + 16
+    max_net_height = max(220, height - net_top - 240)
+    net_height = min(max_net_height, max(240, int(height * 0.4)))
+    net_height = max(220, net_height)
+
+    area_width = max(420, width - 2 * margin)
+    layers = [5, 64, 64, 2]
+    names = ["Input\n(State)", "Hidden 1", "Hidden 2", "Output\n(Action)"]
+    spacing_x = area_width / max(1, len(layers) - 1)
+
+    display_cap = max(6, int(net_height / 36))
+
+    positions: list[list[tuple[int, int]]] = []
+    truncated: List[bool] = []
+    for index, count in enumerate(layers):
+        layer_x = int(margin + index * spacing_x)
+        visible = min(count, display_cap)
+        gap = net_height / (visible + 1)
+        locs = []
+        for node_idx in range(visible):
+            layer_y = int(net_top + (node_idx + 1) * gap)
+            locs.append((layer_x, layer_y))
+        flag = count > visible
+        if flag:
+            locs.append((layer_x, int(net_top + net_height - gap * 0.5)))
+        positions.append(locs)
+        truncated.append(flag)
+
+    intensity: Optional[list[float]] = None
+    if weight_matrix is not None:
+        try:
+            weights = np.asarray(weight_matrix, dtype=np.float32)
+            if weights.ndim == 1:
+                weights = weights[None, :]
+            magnitudes = np.abs(weights).mean(axis=0)
+            maximum = float(np.max(magnitudes)) if np.max(magnitudes) != 0 else 1.0
+            intensity = (magnitudes / maximum).tolist()
+        except Exception:
+            intensity = None
+
+    for layer_idx in range(len(positions) - 1):
+        for start_idx, start_pos in enumerate(positions[layer_idx]):
+            if truncated[layer_idx] and start_idx == len(positions[layer_idx]) - 1:
+                continue
+            for end_idx, end_pos in enumerate(positions[layer_idx + 1]):
+                if (
+                    truncated[layer_idx + 1]
+                    and end_idx == len(positions[layer_idx + 1]) - 1
+                ):
+                    continue
+                blend = layer_idx / (len(positions) - 1)
+                color = (
+                    int(100 + blend * 110),
+                    int(160 - blend * 110),
+                    int(255 - blend * 70),
+                )
+                pygame.draw.line(surface, color, start_pos, end_pos, 1)
+
+    for layer_idx, locs in enumerate(positions):
+        for node_idx, pos in enumerate(locs):
+            is_placeholder = truncated[layer_idx] and node_idx == len(locs) - 1
+            blend = layer_idx / (len(layers) - 1)
+            base_color = [
+                int(80 + blend * 120),
+                int(120 + blend * 30),
+                int(255 - blend * 50),
+            ]
+            if (
+                layer_idx == 1
+                and not is_placeholder
+                and intensity is not None
+                and node_idx < len(intensity)
+            ):
+                boost = intensity[node_idx]
+                base_color[0] = min(255, int(base_color[0] + 120 * boost))
+                base_color[1] = min(255, int(base_color[1] + 40 * boost))
+            if is_placeholder:
+                placeholder = fonts["body"].render("...", True, (200, 200, 200))
+                surface.blit(
+                    placeholder, (pos[0] - placeholder.get_width() // 2, pos[1] + 6)
+                )
+                continue
+            shadow = tuple(max(0, c // 3) for c in base_color)
+            pygame.draw.circle(surface, shadow, pos, 12)
+            pygame.draw.circle(surface, tuple(base_color), pos, 8)
+            pygame.draw.circle(surface, (255, 255, 255), pos, 3)
+
+    label_base = net_top + net_height + 20
+    for index, (name, count) in enumerate(zip(names, layers)):
+        layer_x = int(margin + index * spacing_x)
+        for offset, line in enumerate(name.split("\n")):
+            text = fonts["body"].render(line, True, (190, 190, 210))
+            rect = text.get_rect(center=(layer_x, int(label_base + offset * 18)))
+            surface.blit(text, rect)
+        count_text = fonts["body"].render(f"({count})", True, (120, 120, 150))
+        surface.blit(
+            count_text, count_text.get_rect(center=(layer_x, int(label_base + 44)))
+        )
+
+    return int(net_top + net_height + 70)
+
+
+def _draw_losses(
+    surface, fonts, histories: Dict[str, list], steps: list, top: int
+) -> None:
+    import pygame
+
+    width, height = surface.get_size()
+    margin = 40
+
+    available_height = height - top - margin
+    if available_height < 200:
+        top = max(margin, height - margin - 200)
+        available_height = height - top - margin
+
+    area = pygame.Rect(margin, top, width - 2 * margin, max(200, available_height))
+    pygame.draw.rect(surface, (25, 25, 35), area)
+    pygame.draw.rect(surface, (60, 60, 80), area, 2)
+
+    title = fonts["large"].render("Loss Function", True, (255, 150, 100))
+    surface.blit(title, (area.x, area.y - 34))
+
+    palette = {
+        "policy": (255, 110, 110),
+        "value": (110, 255, 150),
+        "entropy": (150, 150, 255),
+        "total": (255, 255, 120),
+    }
+
+    descriptions = {
+        "policy": ("策略網路損失", "控制動作調整幅度"),
+        "value": ("價值網路誤差", "評估狀態好壞"),
+        "entropy": ("探索程度", "越高越隨機"),
+        "total": ("綜合損失", "整體訓練表現"),
+    }
+
+    legend_width = min(280, area.width // 2)
+    legend_x = area.x + 16
+    legend_y = area.y + 18
+    body_line = fonts["body"].get_linesize()
+    line_height = body_line + 18
+
+    max_points = max((len(values) for values in histories.values()), default=0)
+    if max_points < 2:
+        hint = fonts["body"].render(
+            "Waiting for training data...", True, (160, 160, 160)
+        )
+        surface.blit(hint, (area.x + 24, area.y + area.height // 2))
+        return
+
+    for idx, key in enumerate(["policy", "value", "entropy", "total"]):
+        color = palette[key]
+        y = legend_y + idx * line_height
+        pygame.draw.rect(surface, color, (legend_x, y, 16, 16))
+        series = histories.get(key, [0])
+        latest = series[-1] if series else 0.0
+        label = fonts["body"].render(f"{key.title():<7}: {latest:+.4f}", True, color)
+        surface.blit(label, (legend_x + 24, y - 2))
+        for offset, text_line in enumerate(descriptions[key]):
+            desc_surface = fonts["body"].render(text_line, True, (180, 180, 200))
+            surface.blit(desc_surface, (legend_x + 24, y + 18 + offset * body_line))
+
+    plot = pygame.Rect(
+        legend_x + legend_width,
+        area.y + 14,
+        max(120, area.width - legend_width - 30),
+        area.height - 32,
+    )
+    pygame.draw.rect(surface, (18, 18, 26), plot)
+
+    def normalise(series: Iterable[float]) -> Optional[np.ndarray]:
+        values = np.asarray(list(series), dtype=np.float32)
+        if values.size == 0:
+            return None
+        values = values[-plot.width :]
+        minimum = float(values.min())
+        maximum = float(values.max())
+        if abs(maximum - minimum) < 1e-6:
+            return values - minimum
+        return (values - minimum) / (maximum - minimum)
+
+    for key in ["policy", "value", "entropy", "total"]:
+        normalised = normalise(histories.get(key, []))
+        if normalised is None or normalised.size < 2:
+            continue
+        points = []
+        for idx, val in enumerate(normalised):
+            x = plot.x + int(idx * (plot.width - 2) / max(1, normalised.size - 1))
+            y = plot.y + plot.height - int(val * (plot.height - 6)) - 3
+            points.append((x, y))
+        if len(points) > 1:
+            pygame.draw.lines(surface, palette[key], False, points, 2)
+
+    visible_count = min(len(steps), plot.width)
+    if visible_count > 1:
+        axis_steps = steps[-visible_count:]
+        pygame.draw.line(
+            surface,
+            (90, 90, 120),
+            (plot.x, plot.bottom - 2),
+            (plot.right, plot.bottom - 2),
+            1,
+        )
+        tick_indices = sorted({0, visible_count // 2, visible_count - 1})
+        for idx in tick_indices:
+            x = plot.x + int(idx * (plot.width - 2) / max(1, visible_count - 1))
+            pygame.draw.line(
+                surface, (130, 130, 150), (x, plot.bottom - 2), (x, plot.bottom - 8), 1
+            )
+            label = fonts["body"].render(str(axis_steps[idx]), True, (170, 170, 190))
+            surface.blit(label, (x - label.get_width() // 2, plot.bottom + 4))
+
+
+def _training_window_process(queue_: Queue, stop_event: Event, width: int, height: int):
+    os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+
+    import pygame
+
+    pygame.init()
+    pygame.font.init()
+    min_width, min_height = 720, 520
+    width = max(min_width, width)
+    height = max(min_height, height)
+    screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
+    pygame.display.set_caption(f"AI Training Visualization ({width}x{height})")
+    clock = pygame.time.Clock()
+
+    fonts = _prepare_fonts(pygame)
+    histories = {"policy": [], "value": [], "entropy": [], "total": []}
+    iteration = 0
+    weights = None
+    history_steps: List[int] = []
+
+    while not stop_event.is_set():
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                stop_event.set()
+            elif event.type == pygame.VIDEORESIZE:
+                width = max(min_width, event.w)
+                height = max(min_height, event.h)
+                screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
+                pygame.display.set_caption(
+                    f"AI Training Visualization ({width}x{height})"
+                )
+
+        try:
+            while True:
+                payload: _Payload = queue_.get_nowait()
+                metrics = payload.metrics or {}
+                iteration = int(metrics.get("it", iteration))
+                _update_histories(histories, metrics, history_steps)
+                if payload.weights is not None:
+                    weights = payload.weights
+        except queue.Empty:
+            pass
+
+        screen.fill((15, 15, 20))
+        losses_top = _draw_network(screen, fonts, iteration, weights)
+        _draw_losses(screen, fonts, histories, history_steps, losses_top + 20)
+
+        pygame.display.flip()
+        clock.tick(30)
+
+    pygame.quit()
 
 
 class TrainingWindow:
-    """AI 訓練時的獨立視覺化視窗"""
-    WIDTH = 800
-    HEIGHT = 600
-    BG_COLOR = (15, 15, 20)
-    FPS = 30
-    
-    def __init__(self):
-        """初始化訓練視窗"""
-        self.screen = None
-        self.clock = None
-        self.running = False
-        self.thread = None
-        
-        # 數據存儲（線程安全）
-        self._lock = threading.Lock()
-        self.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
-        self.latest_metrics = {}
-        self.network_weights = None
-        self.current_iteration = 0
-        
-        # 字體
-        self.font = None
-        self.large_font = None
-        self.title_font = None
-        
-    def _init_pygame(self):
-        """在新線程中初始化 Pygame"""
-        pygame.init()
-        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        pygame.display.set_caption("AI Training Visualization")
-        self.clock = pygame.time.Clock()
-        
-        # 載入字體
-        chinese_fonts = ['microsoftyahei', 'simhei', 'arial']
-        for font_name in chinese_fonts:
-            try:
-                self.font = pygame.font.SysFont(font_name, 20)
-                self.large_font = pygame.font.SysFont(font_name, 28)
-                self.title_font = pygame.font.SysFont(font_name, 32)
-                test = self.font.render("測試", True, (255, 255, 255))
-                if test.get_width() > 0:
-                    break
-            except Exception:
-                continue
-        
-        if self.font is None:
-            self.font = pygame.font.Font(None, 20)
-            self.large_font = pygame.font.Font(None, 28)
-            self.title_font = pygame.font.Font(None, 32)
-    
-    def update_data(self, metrics: Dict):
-        """更新訓練數據（從主線程調用）"""
-        with self._lock:
-            if metrics.get("policy_loss") is not None:
-                self.loss_history["policy"].append(float(metrics["policy_loss"]))
-            if metrics.get("value_loss") is not None:
-                self.loss_history["value"].append(float(metrics["value_loss"]))
-            if metrics.get("entropy") is not None:
-                self.loss_history["entropy"].append(float(metrics["entropy"]))
-            if metrics.get("loss") is not None:
-                self.loss_history["total"].append(float(metrics["loss"]))
-            
-            self.latest_metrics = dict(metrics)
-            if metrics.get("it") is not None:
-                self.current_iteration = int(metrics["it"])
-    
-    def draw_neural_network(self):
-        """繪製神經網路視覺化（科技感風格）"""
-        # 網路結構定義
-        nn_x = 50
-        nn_y = 50
-        nn_width = 700
-        nn_height = 250
-        
-        # 繪製標題
-        title = self.title_font.render(f"Neural Network (Iteration n={self.current_iteration})", True, (100, 200, 255))
-        self.screen.blit(title, (nn_x, nn_y - 40))
-        
-        # 定義網路層結構：[輸入層, 隱藏層1, 隱藏層2, 輸出層]
-        layers = [5, 64, 64, 2]  # 實際的 Actor-Critic 網路結構
-        layer_names = ["Input\n(State)", "Hidden 1", "Hidden 2", "Output\n(Action)"]
-        
-        # 計算節點位置
-        layer_spacing = nn_width / (len(layers) + 1)
-        node_positions = []
-        
-        for i, num_nodes in enumerate(layers):
-            layer_x = nn_x + (i + 1) * layer_spacing
-            positions = []
-            node_spacing = nn_height / (num_nodes + 1)
-            
-            # 如果節點太多，只顯示部分節點
-            display_nodes = min(num_nodes, 8)
-            for j in range(display_nodes):
-                if display_nodes < num_nodes and j == display_nodes - 1:
-                    # 最後一個節點代表省略
-                    node_y = nn_y + nn_height / 2
-                else:
-                    node_y = nn_y + (j + 1) * (nn_height / (display_nodes + 1))
-                positions.append((layer_x, node_y))
-            node_positions.append(positions)
-        
-        # 繪製連接線（漸變效果）
-        for i in range(len(node_positions) - 1):
-            for start_pos in node_positions[i]:
-                for end_pos in node_positions[i + 1]:
-                    # 計算線條顏色（藍色到紫色漸變）
-                    progress = i / (len(node_positions) - 1)
-                    r = int(100 + progress * 100)
-                    g = int(150 - progress * 100)
-                    b = int(255 - progress * 50)
-                    
-                    # 繪製半透明連接線
-                    pygame.draw.line(self.screen, (r, g, b), start_pos, end_pos, 1)
-        
-        # 繪製節點
-        for i, positions in enumerate(node_positions):
-            for j, pos in enumerate(positions):
-                # 節點顏色（科技藍到科技紫）
-                progress = i / (len(layers) - 1)
-                r = int(80 + progress * 120)
-                g = int(120 + progress * 30)
-                b = int(255 - progress * 50)
-                
-                # 繪製節點（外圈光暈效果）
-                pygame.draw.circle(self.screen, (r // 3, g // 3, b // 3), pos, 12)
-                pygame.draw.circle(self.screen, (r, g, b), pos, 8)
-                pygame.draw.circle(self.screen, (255, 255, 255), pos, 3)
-                
-                # 如果是省略符號
-                if j == len(positions) - 1 and len(positions) < layers[i]:
-                    text = self.font.render("...", True, (200, 200, 200))
-                    self.screen.blit(text, (pos[0] - 10, pos[1] + 15))
-        
-        # 繪製層標籤
-        for i, (name, num_nodes) in enumerate(zip(layer_names, layers)):
-            layer_x = nn_x + (i + 1) * layer_spacing
-            label_y = nn_y + nn_height + 20
-            
-            lines = name.split('\n')
-            for idx, line in enumerate(lines):
-                text = self.font.render(line, True, (180, 180, 200))
-                text_rect = text.get_rect(center=(layer_x, label_y + idx * 20))
-                self.screen.blit(text, text_rect)
-            
-            # 顯示節點數量
-            count_text = self.font.render(f"({num_nodes})", True, (120, 120, 150))
-            count_rect = count_text.get_rect(center=(layer_x, label_y + len(lines) * 20 + 10))
-            self.screen.blit(count_text, count_rect)
-    
-    def draw_loss_function(self):
-        """繪製 Loss Function 圖表"""
-        loss_x = 50
-        loss_y = 350
-        loss_width = 700
-        loss_height = 200
-        
-        # 繪製標題
-        title = self.large_font.render("Loss Function", True, (255, 150, 100))
-        self.screen.blit(title, (loss_x, loss_y - 35))
-        
-        # 繪製背景框
-        pygame.draw.rect(self.screen, (25, 25, 35), (loss_x, loss_y, loss_width, loss_height))
-        pygame.draw.rect(self.screen, (60, 60, 80), (loss_x, loss_y, loss_width, loss_height), 2)
-        
-        # 獲取數據
-        with self._lock:
-            lh_copy = {k: list(v) for k, v in self.loss_history.items()}
-        
-        max_len = max((len(v) for v in lh_copy.values()), default=0)
-        
-        if max_len < 2:
-            hint = self.font.render("Waiting for training data...", True, (150, 150, 150))
-            self.screen.blit(hint, (loss_x + 20, loss_y + loss_height // 2))
+    """Spawn a detached dashboard process to visualise live training metrics."""
+
+    WIDTH = 960
+    HEIGHT = 720
+
+    def __init__(self) -> None:
+        self._queue = Queue(maxsize=10)
+        self._stop_event = Event()
+        self._process: Optional[Process] = None
+
+    def start(self) -> None:
+        if self._process is not None and self._process.is_alive():
             return
-        
-        # 繪製圖例和最新值
-        legend_x = loss_x + 10
-        legend_y = loss_y + 10
-        series_info = [
-            ("Policy", "policy", (255, 100, 100)),
-            ("Value", "value", (100, 255, 150)),
-            ("Entropy", "entropy", (150, 150, 255)),
-            ("Total", "total", (255, 255, 100))
-        ]
-        
-        for idx, (name, key, color) in enumerate(series_info):
-            y_pos = legend_y + idx * 25
-            # 顏色方塊
-            pygame.draw.rect(self.screen, color, (legend_x, y_pos, 15, 15))
-            # 標籤和最新值
-            latest_val = lh_copy[key][-1] if lh_copy.get(key) else 0.0
-            text = self.font.render(f"{name}: {latest_val:.4f}", True, color)
-            self.screen.blit(text, (legend_x + 20, y_pos))
-        
-        # 繪製圖表
-        plot_x = loss_x + 150
-        plot_y = loss_y + 10
-        plot_width = loss_width - 160
-        plot_height = loss_height - 20
-        
-        N = min(max_len, plot_width)
-        
-        for key, color in [("policy", (255, 100, 100)), ("value", (100, 255, 150)),
-                          ("entropy", (150, 150, 255)), ("total", (255, 255, 100))]:
-            seq = lh_copy.get(key, [])
-            if not seq:
-                continue
-            
-            seq = seq[-N:]
-            if len(seq) < 2:
-                continue
-            
-            mx = max(seq)
-            mn = min(seq)
-            denom = mx - mn if mx != mn else 1.0
-            
-            points = []
-            for i, val in enumerate(seq):
-                px = plot_x + int(i * plot_width / max(N - 1, 1))
-                py = plot_y + plot_height - int((val - mn) / denom * (plot_height - 4))
-                points.append((px, py))
-            
-            if len(points) > 1:
-                pygame.draw.lines(self.screen, color, False, points, 2)
-    
-    def _run_loop(self):
-        """視窗主循環（在獨立線程中運行）"""
-        self._init_pygame()
-        self.running = True
-        
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-            
-            # 清空畫面
-            self.screen.fill(self.BG_COLOR)
-            
-            # 繪製內容
-            self.draw_neural_network()
-            self.draw_loss_function()
-            
-            # 更新顯示
-            pygame.display.flip()
-            self.clock.tick(self.FPS)
-        
-        pygame.quit()
-    
-    def start(self):
-        """啟動訓練視窗（非阻塞）"""
-        if self.thread is not None and self.thread.is_alive():
-            return  # 已經在運行
-        
-        self.thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.thread.start()
-    
-    def stop(self):
-        """停止訓練視窗"""
-        self.running = False
-        if self.thread is not None:
-            self.thread.join(timeout=2.0)
+        self._stop_event.clear()
+        process = Process(
+            target=_training_window_process,
+            args=(self._queue, self._stop_event, self.WIDTH, self.HEIGHT),
+            name="TrainingWindow",
+            daemon=True,
+        )
+        process.start()
+        self._process = process
+
+    def update_data(self, metrics: Dict, weights: Optional[np.ndarray] = None) -> None:
+        if self._process is None or not self._process.is_alive():
+            return
+        safe_weights = None
+        if weights is not None:
+            try:
+                safe_weights = np.asarray(weights, dtype=np.float32)
+            except Exception:
+                safe_weights = None
+        payload = _Payload(metrics=dict(metrics or {}), weights=safe_weights)
+        try:
+            self._queue.put_nowait(payload)
+        except queue.Full:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._queue.put_nowait(payload)
+            except queue.Full:
+                pass
+
+    def stop(self) -> None:
+        if self._process is None:
+            return
+        if self._process.is_alive():
+            self._stop_event.set()
+            self._process.join(timeout=2.0)
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        self._process = None
+        self._stop_event.clear()
+
+    def is_running(self) -> bool:
+        return self._process is not None and self._process.is_alive()

@@ -7,9 +7,9 @@ def test_ui_smoke_steps():
     This ensures the core loop (step/reset/done handling) runs without errors.
     """
     env = GameEnv(seed=42)
-    s = env.reset()
+    env.reset()
     for _ in range(20):
-        s, r, done, _ = env.step(0)
+        _, _, done, _ = env.step(0)
         if done:
-            s = env.reset()
+            env.reset()
     assert True

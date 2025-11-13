@@ -9,7 +9,7 @@ class GameEnv:
     State (unnormalized): [y, vy, x_obs, y_gap_top, y_gap_bottom]
     All values are returned normalized by the public constants when step/reset
     so agents can consume normalized inputs.
-    
+
     Note: State only exposes the nearest obstacle for compatibility, but internally
     maintains multiple obstacles for smooth scrolling gameplay.
     """
@@ -24,9 +24,11 @@ class GameEnv:
     # spacing between obstacles (minimum distance)
     ObstacleSpacing = 250.0
 
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, max_steps=1000):
         self.rng = random.Random(seed)
         self.obstacles = []  # list of (x, gap_top, gap_bottom, passed) tuples
+        # Optional step limit (None for unlimited play)
+        self.max_steps = max_steps
         self.reset()
 
     def reset(self):  # noqa: C901
@@ -36,7 +38,7 @@ class GameEnv:
         safe_max = self.ScreenHeight * 0.7  # 70% from top (30% from bottom)
         self.y = self.rng.uniform(safe_min, safe_max)
         self.vy = 0.0
-        
+
         # Initialize multiple obstacles for smooth scrolling
         self.obstacles = []
         # Create initial obstacles spaced out from right edge
@@ -49,7 +51,7 @@ class GameEnv:
             # (x, gap_top, gap_bottom, passed_flag)
             self.obstacles.append([spawn_x, gap_top, gap_bottom, False])
             spawn_x += self.ObstacleSpacing
-        
+
         self.t = 0
         self.done = False
         # track cumulative score for the current episode
@@ -61,19 +63,19 @@ class GameEnv:
     def _get_state(self):
         # Find the nearest obstacle ahead of the player (at x ~= 0)
         nearest_obs = None
-        min_dist = float('inf')
+        min_dist = float("inf")
         for obs in self.obstacles:
             if obs[0] >= -20:  # Only consider obstacles that haven't passed yet
                 if obs[0] < min_dist:
                     min_dist = obs[0]
                     nearest_obs = obs
-        
+
         # If no obstacle found, use a dummy far away obstacle
         if nearest_obs is None:
             ob_x, gap_top, gap_bottom = self.MaxDist, 250.0, 350.0
         else:
             ob_x, gap_top, gap_bottom = nearest_obs[0], nearest_obs[1], nearest_obs[2]
-        
+
         s = np.array(
             [
                 self.y / self.ScreenHeight,
@@ -106,15 +108,17 @@ class GameEnv:
         self.y += self.vy * dt
 
         # compute dynamic scroll speed that increases with passed obstacles
-        current_scroll = self.ScrollSpeed * (1.0 + self.passed_count * self.ScrollIncreasePerPass)
-        
+        current_scroll = self.ScrollSpeed * (
+            1.0 + self.passed_count * self.ScrollIncreasePerPass
+        )
+
         # Move all obstacles left by scroll speed
         for obs in self.obstacles:
             obs[0] -= current_scroll
-        
+
         # Remove obstacles that have scrolled off the left side
         self.obstacles = [obs for obs in self.obstacles if obs[0] > -100]
-        
+
         # Spawn new obstacles from the right when needed
         # Keep spawning if rightmost obstacle is too close
         while True:
@@ -127,7 +131,7 @@ class GameEnv:
                     spawn_x = rightmost_x + self.ObstacleSpacing
                 else:
                     break  # No need to spawn yet
-            
+
             gap_center = self.rng.uniform(80.0, self.ScreenHeight - 80.0)
             gap_half = self.rng.uniform(45.0, 60.0)
             gap_top = gap_center - gap_half
@@ -137,12 +141,13 @@ class GameEnv:
 
         reward = 0.0  # 移除時間懲罰，讓分數更直觀
         done = False
-        ball_margin = 15.0  # 球半徑 12 + 小容差
+        ball_margin = 10.0  # 稍微縮小判定半徑，降低誤判
+        collision_window = 14.0  # 更貼近球心與障礙物的實際接觸範圍
 
         # Check collisions and pass-through events for all obstacles
         for obs in self.obstacles:
             ob_x, gap_top, gap_bottom = obs[0], obs[1], obs[2]
-            
+
             # Detect pass-through event: obstacle crosses player's x ~= 0
             # Player is at x=0, check if obstacle just passed
             if not obs[3] and ob_x <= 0 and ob_x > -current_scroll * 2:
@@ -151,10 +156,10 @@ class GameEnv:
                 if gap_top + ball_margin < self.y < gap_bottom - ball_margin:
                     reward += 5.0
                     self.passed_count += 1
-            
+
             # Check collision: obstacle overlaps with player position (x ~= 0)
             # Player occupies x range roughly [-20, 20]
-            if -20 < ob_x < 20:
+            if -collision_window < ob_x < collision_window:
                 # Check if ball is outside the gap
                 if not (gap_top + ball_margin < self.y < gap_bottom - ball_margin):
                     reward -= 5.0
@@ -171,7 +176,7 @@ class GameEnv:
         self.episode_score += float(reward)
 
         self.t += 1
-        if self.t > 1000:
+        if self.max_steps is not None and self.t >= self.max_steps:
             done = True
 
         self.done = done
@@ -190,11 +195,11 @@ class GameEnv:
             f"t={self.t} y={self.y:.1f} vy={self.vy:.1f} obstacles={obs_count} "
             f"nearest_x={nearest_x:.1f}"
         )
-    
+
     def get_all_obstacles(self):
-        """Return all obstacles for rendering. Each obstacle is (x, gap_top, gap_bottom)."""
+        """Return obstacles as (x, gap_top, gap_bottom) tuples for rendering."""
         return [(obs[0], obs[1], obs[2]) for obs in self.obstacles]
-    
+
     # Backward compatibility properties for legacy tests
     @property
     def ob_x(self):
@@ -202,32 +207,36 @@ class GameEnv:
         if not self.obstacles:
             return self.MaxDist
         return min(obs[0] for obs in self.obstacles if obs[0] >= -20)
-    
+
     @ob_x.setter
     def ob_x(self, value):
         """Set x position of nearest obstacle (for backward compatibility)."""
         if self.obstacles:
             # Find and update the nearest obstacle
             nearest_idx = 0
-            min_dist = float('inf')
+            min_dist = float("inf")
             for i, obs in enumerate(self.obstacles):
                 if obs[0] < min_dist:
                     min_dist = obs[0]
                     nearest_idx = i
             self.obstacles[nearest_idx][0] = value
-    
+
     @property
     def gap_top(self):
         """Get gap_top of nearest obstacle (for backward compatibility)."""
         if not self.obstacles:
             return 250.0
-        nearest = min(self.obstacles, key=lambda obs: obs[0] if obs[0] >= -20 else float('inf'))
+        nearest = min(
+            self.obstacles, key=lambda obs: obs[0] if obs[0] >= -20 else float("inf")
+        )
         return nearest[1]
-    
+
     @property
     def gap_bottom(self):
         """Get gap_bottom of nearest obstacle (for backward compatibility)."""
         if not self.obstacles:
             return 350.0
-        nearest = min(self.obstacles, key=lambda obs: obs[0] if obs[0] >= -20 else float('inf'))
+        nearest = min(
+            self.obstacles, key=lambda obs: obs[0] if obs[0] >= -20 else float("inf")
+        )
         return nearest[2]

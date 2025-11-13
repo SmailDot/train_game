@@ -19,26 +19,40 @@ try:
             self.net = ActorCritic().to(self.device)
             self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
 
-        def act(self, state):
-            # state: numpy array
+        def act(self, state, explore: bool = False):
+            """Return an action for the provided state.
+
+            By default the policy behaves deterministically (threshold at 0.5)
+            so the on-screen agent produces stable trajectories. Set
+            ``explore=True`` to sample from the Bernoulli distribution instead
+            (useful for debugging or custom rollouts).
+            """
+
             s = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(
                 0
             )
             logits, value = self.net(s)
-            prob_t = torch.sigmoid(logits).squeeze(0)  # tensor
-            prob = (
-                prob_t.detach().cpu().numpy()[0]
-                if prob_t.dim()
-                else prob_t.detach().cpu().item()
-            )
-            action = int((prob > 0.5))
-            # compute log-prob using tensors to avoid mixing types
-            if action:
-                logp_t = torch.log(prob_t + 1e-8)
+            prob = torch.sigmoid(logits)
+            prob = prob.clamp(min=1e-6, max=1 - 1e-6)
+
+            if explore:
+                dist = torch.distributions.Bernoulli(probs=prob)
+                action_t = dist.sample()
+                logp_t = dist.log_prob(action_t)
             else:
-                logp_t = torch.log(1 - prob_t + 1e-8)
+                action_val = (prob >= 0.5).float()
+                action_t = action_val
+                # log probability for the chosen deterministic action
+                logp_t = torch.where(
+                    action_val > 0.5,
+                    torch.log(prob),
+                    torch.log(1.0 - prob),
+                )
+
+            action = int(action_t.item())
             logp = float(logp_t.detach().cpu().item())
-            return action, logp, float(value.detach().cpu().numpy()[0, 0])
+            value_out = float(value.detach().cpu().item())
+            return action, logp, value_out
 
     # Full update not implemented here (omitted for brevity).
 
@@ -49,7 +63,7 @@ except Exception:
         def __init__(self, seed=1):
             self.rng = np.random.RandomState(seed)
 
-        def act(self, state) -> Tuple[int, float, float]:
+        def act(self, state, explore: bool = False) -> Tuple[int, float, float]:
             a = int(self.rng.rand() > 0.9)
             return a, 0.0, 0.0
 

@@ -23,7 +23,7 @@ try:
             return logits, value
 
         def get_weight_matrix(self):
-            """Return a small 2D numpy array representing actor layer weights for visualization."""
+            """Return actor weights as a tiny 2D array for visualization."""
             try:
                 w = self.actor.weight.detach().cpu().numpy()
                 return w
