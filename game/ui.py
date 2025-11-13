@@ -304,6 +304,10 @@ class GameUI:
                 self.game_over = False
                 self.running = False
                 self.mode = "Menu"
+                # 停止訓練器（如果正在運行）
+                if self.trainer_thread is not None and self.trainer_thread.is_alive():
+                    print("正在停止訓練器...")
+                    self.stop_trainer(wait=False, timeout=2.0)
                 # 關閉訓練視窗（如果有）
                 if self.training_window is not None:
                     self.training_window.stop()
@@ -323,6 +327,10 @@ class GameUI:
                 self.paused = False
                 self.running = False
                 self.mode = "Menu"
+                # 停止訓練器（如果正在運行）
+                if self.trainer_thread is not None and self.trainer_thread.is_alive():
+                    print("正在停止訓練器...")
+                    self.stop_trainer(wait=False, timeout=2.0)
                 # 關閉訓練視窗（如果有）
                 if self.training_window is not None:
                     self.training_window.stop()
@@ -357,6 +365,22 @@ class GameUI:
             if self.training_window is None:
                 self.training_window = TrainingWindow()
                 self.training_window.start()
+            
+            # 啟動背景訓練（如果 PyTorch 可用）
+            if self.trainer_thread is None or not self.trainer_thread.is_alive():
+                try:
+                    from agents.pytorch_trainer import PPOTrainer
+                    trainer = PPOTrainer()
+                    print("正在啟動 PPO 訓練器...")
+                    self.start_trainer(
+                        trainer,
+                        total_timesteps=50000,
+                        env=self.env,
+                        log_interval=1
+                    )
+                except Exception as e:
+                    print(f"無法啟動訓練器：{e}")
+                    print("將使用現有 agent 進行遊玩")
             
             # Reset environment and return the new state
             return self.env.reset()
@@ -654,6 +678,11 @@ class GameUI:
             pygame.display.flip()
             self.clock.tick(self.FPS)
 
+        # 清理：停止訓練器（如果正在運行）
+        if self.trainer_thread is not None and self.trainer_thread.is_alive():
+            print("正在停止訓練器...")
+            self.stop_trainer(wait=True, timeout=5.0)
+        
         # 清理：關閉訓練視覺化視窗
         if self.training_window is not None:
             self.training_window.stop()
