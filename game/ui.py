@@ -41,6 +41,11 @@ class GameUI:
 
         # leaderboard: list of (name, score), newest entries appended; keep top scores
         self.leaderboard = [("AgentA", 10), ("AgentB", 7), ("Human", 3)]
+        # loss history storage for visualization: dict of name -> list[float]
+        self.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
+        # surface for small loss plot
+        self.loss_surf_size = (self.panel.width - 40, 120)
+        self.loss_surf = pygame.Surface(self.loss_surf_size)
 
     def draw_playfield(self, state):
         # draw background for play area
@@ -178,6 +183,15 @@ class GameUI:
         ex_text = self.font.render("Export weights to TensorBoard", True, (240, 240, 240))
         self.screen.blit(ex_text, (self.btn_export.left + 8, self.btn_export.top + 4))
 
+        # Loss visualization area (below nn_rect)
+        loss_rect = pygame.Rect(self.panel.left + 20, nn_rect.bottom + 8, self.panel.width - 40, 120)
+        pygame.draw.rect(self.screen, (30, 30, 36), loss_rect)
+        loss_title = self.font.render("Losses (policy / value / entropy / total)", True, (200, 200, 200))
+        self.screen.blit(loss_title, (loss_rect.left + 8, loss_rect.top + 6))
+
+        # draw simple multi-series plot
+        self._draw_loss_plot(loss_rect.left + 8, loss_rect.top + 28, loss_rect.width - 16, loss_rect.height - 36)
+
         # leaderboard
         lb_top = nn_rect.bottom + 12
         lb_title = self.font.render("Leaderboard:", True, (220, 220, 220))
@@ -199,6 +213,56 @@ class GameUI:
         if self.btn_board.collidepoint(pos):
             # toggle leaderboard maybe
             return
+
+    def _draw_loss_plot(self, x, y, w, h):
+        """Draw multiple loss series (policy, value, entropy, total) into panel area.
+
+        x,y are screen coordinates, w,h are dimensions.
+        """
+        surf = pygame.Surface((w, h))
+        surf.fill((20, 20, 30))
+        # draw dark background
+        pygame.draw.rect(surf, (24, 24, 28), (0, 0, w, h))
+
+        # determine max length among series
+        max_len = 0
+        for v in self.loss_history.values():
+            if v:
+                max_len = max(max_len, len(v))
+
+        if max_len < 2:
+            # draw a hint text
+            hint = self.font.render("No loss data yet", True, (150, 150, 150))
+            surf.blit(hint, (6, 6))
+            self.screen.blit(surf, (x, y))
+            return
+
+        N = min(max_len, w)
+        series_colors = {
+            "policy": (200, 80, 80),
+            "value": (80, 200, 120),
+            "entropy": (120, 120, 200),
+            "total": (220, 220, 80),
+        }
+
+        for name, color in series_colors.items():
+            seq = list(self.loss_history.get(name, []))
+            if not seq:
+                continue
+            seq = seq[-N:]
+            mx = max(seq)
+            mn = min(seq)
+            denom = mx - mn if mx != mn else 1.0
+            points = []
+            for i, val in enumerate(seq):
+                vx = int(i * (w - 2) / max(1, N - 1))
+                vy = int((h - 2) - (val - mn) / denom * (h - 4))
+                points.append((vx, vy))
+            if len(points) > 1:
+                pygame.draw.lines(surf, color, False, points, 2)
+
+        # blit the plot surface
+        self.screen.blit(surf, (x, y))
 
     def export_weights(self):
         """Export actor weights to TensorBoard (if available) or save a local numpy file.
