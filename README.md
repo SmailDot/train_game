@@ -80,3 +80,49 @@ python -c "from agents.pytorch_trainer import PPOTrainer; t=PPOTrainer(); t.trai
 ---
 小節：本專案包含 `game/` (環境與 UI)、`agents/` (網路、PPO trainer)、`tests/` (pytest)、以及 CI + pre-commit configs。
 ```
+ 
+## 變數、狀態與獎勵（Definitions）
+
+- 狀態 (State) S：5 維向量 $[y, v_y, x_{obs}, y_{gap\_top}, y_{gap\_bottom}]$，其中 $y$、$v_y$、$y_{gap\_top}$、$y_{gap\_bottom}$ 已被歸一化至畫面高度，$x_{obs}$ 為障礙物到玩家的相對距離並以最大距離做正規化。
+- 動作 (Action) A：二元，0 = 不跳、1 = 跳（一次性向上 impulse）。
+- 獎勵 (Reward) R（已實作）：
+	- 每步時間懲罰：$r_{step} = -0.1$
+	- 通過障礙：$r_{pass} = +5.0$（當障礙橫過玩家位置且球處於 gap 範圍內）
+	- 碰撞障礙或超出上下界（掉落或撞上天花板）：$r_{collision} = -5.0$
+
+## PPO 與 GAE 相關公式（摘要）
+
+以下列出訓練中使用的主要公式，方便把 trainer 的行為與 UI 上顯示的數值對應起來。
+
+- 折扣回報（Return）：
+$$G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k}$$
+
+- 時間差分與廣義優勢估計（GAE）：
+\begin{aligned}
+\delta_t &= r_t + \gamma V(s_{t+1}) - V(s_t) \\
+\hat{A}_t &= \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}
+\end{aligned}
+
+- PPO 剪裁目標（Clipped surrogate objective）:
+\begin{aligned}
+L^{CLIP}(\theta) = - \mathbb{E}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]
+\end{aligned}
+其中 $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$。
+
+- 值函數損失（Value loss）：
+$$L^{VF} = \mathbb{E}_t\left[ (V_\theta(s_t) - R_t)^2 \right]$$
+
+- 熵項（鼓勵探索）：
+$$S[\pi_\theta](s_t) = - \sum_a \pi_\theta(a|s_t) \log \pi_\theta(a|s_t)$$
+
+- 總損失（訓練器內使用，權重可調）：
+$$L = L^{CLIP} + c_{vf} L^{VF} - c_{ent} S[\pi]\; .$$
+
+## 在 UI 上顯示的項目
+
+- Model weights heatmap：顯示 actor 層（或提供的權重矩陣）縮放後的 2D 圖示。
+- Loss 圖：多維度 (policy / value / entropy / total) 時序曲線（在右側 Panel 的 Loss 區塊）。訓練器若提供歷史值，UI 會即時繪製；否則顯示 placeholder。
+- episode 分數：當回合結束時，當前回合分數會加入排行榜（Leaderboard）並在面板中顯示。
+
+若要把其他公式或變數加入 README（例如更細的超參數表格或輸出正規化細節），我可以把它補進來。
+
