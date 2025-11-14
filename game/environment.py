@@ -15,10 +15,10 @@ class GameEnv:
     """
 
     ScreenHeight = 600  # 增加遊玩畫面高度以匹配更大的顯示區域
-    MaxDist = 300
+    MaxDist = 150  # 減少初始距離，讓障礙物更快到達
     MaxAbsVel = 20.0
     # horizontal scroll speed (pixels per step) base value
-    ScrollSpeed = 2.0
+    ScrollSpeed = 3.0  # 增加滾動速度
     # how much to increase scroll per passed obstacle (fraction per pass)
     ScrollIncreasePerPass = 0.02
     # spacing between obstacles (minimum distance)
@@ -34,8 +34,8 @@ class GameEnv:
     def reset(self):  # noqa: C901
         # ball: spawn at a random vertical position in the middle 60% of screen
         # avoid spawning too close to top or bottom edges
-        safe_min = self.ScreenHeight * 0.3  # 30% from top
-        safe_max = self.ScreenHeight * 0.7  # 70% from top (30% from bottom)
+        safe_min = self.ScreenHeight * 0.4  # 40% from top (更居中)
+        safe_max = self.ScreenHeight * 0.6  # 60% from top (更居中)
         self.y = self.rng.uniform(safe_min, safe_max)
         self.vy = 0.0
 
@@ -44,8 +44,8 @@ class GameEnv:
         # Create initial obstacles spaced out from right edge
         spawn_x = self.MaxDist
         for _ in range(3):  # Start with 3 obstacles visible
-            gap_center = self.rng.uniform(80.0, self.ScreenHeight - 80.0)
-            gap_half = self.rng.uniform(45.0, 60.0)
+            gap_center = self.rng.uniform(150.0, self.ScreenHeight - 150.0)
+            gap_half = self.rng.uniform(80.0, 100.0)  # 增加間隙大小 160-200
             gap_top = gap_center - gap_half
             gap_bottom = gap_center + gap_half
             # (x, gap_top, gap_bottom, passed_flag)
@@ -132,14 +132,14 @@ class GameEnv:
                 else:
                     break  # No need to spawn yet
 
-            gap_center = self.rng.uniform(80.0, self.ScreenHeight - 80.0)
-            gap_half = self.rng.uniform(45.0, 60.0)
+            gap_center = self.rng.uniform(150.0, self.ScreenHeight - 150.0)
+            gap_half = self.rng.uniform(80.0, 100.0)  # 增加間隙大小 160-200
             gap_top = gap_center - gap_half
             gap_bottom = gap_center + gap_half
             self.obstacles.append([spawn_x, gap_top, gap_bottom, False])
             break  # Only spawn one per step
 
-        reward = 0.0  # 移除時間懲罰，讓分數更直觀
+        reward = 0.1  # 每步存活獎勵，鼓勵存活更久
         done = False
 
         # 球的半徑（與 UI 中的繪製大小一致）
@@ -157,8 +157,12 @@ class GameEnv:
             # Player is at x=0, check if obstacle just passed
             if not obs[3] and ob_x <= 0 and ob_x > -current_scroll * 2:
                 obs[3] = True  # Mark as passed
-                # Check if ball was in the gap when passing (球心在間隙內即可)
-                if gap_top < self.y < gap_bottom:
+                # Check if ball was in the gap when passing
+                # 使用球體邊緣而不是球心來判斷，與碰撞檢測一致
+                ball_top = self.y - ball_radius
+                ball_bottom = self.y + ball_radius
+                # 球體沒有與障礙物碰撞（即在間隙內通過）
+                if ball_top >= gap_top and ball_bottom <= gap_bottom:
                     reward += 5.0
                     self.passed_count += 1
 

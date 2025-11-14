@@ -81,7 +81,12 @@ try:
                     config = json.load(f)
 
                 # 根據設備類型選擇配置
-                mode = "gpu_training" if self.device.type == "cuda" else "cpu_training"
+                device_type = (
+                    self.device.type
+                    if hasattr(self.device, "type")
+                    else str(self.device)
+                )
+                mode = "gpu_training" if device_type == "cuda" else "cpu_training"
                 params = config.get(mode, {})
 
                 updated = False
