@@ -1064,6 +1064,28 @@ try:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")
 
+                    # 如果當前表現是歷史最佳，額外保存一個 "best" 檢查點
+                    if mean_reward is not None and mean_reward > self.best_reward:
+                        best_path = os.path.join(self.save_dir, "checkpoint_best.pt")
+                        try:
+                            torch.save(
+                                {
+                                    "model_state": self.net.state_dict(),
+                                    "optimizer_state": self.opt.state_dict(),
+                                    "iteration": it,
+                                    "mean_reward": mean_reward,
+                                    "max_reward": max_reward,
+                                    "min_reward": min_reward,
+                                },
+                                best_path,
+                            )
+                            print(
+                                f"💎 保存最佳檢查點: {best_path} "
+                                f"(平均分: {mean_reward:.2f})"
+                            )
+                        except Exception as e:
+                            print(f"⚠️  保存最佳檢查點失敗: {e}")
+
                 if total_timesteps is not None and timesteps >= total_timesteps:
                     break
 

@@ -473,19 +473,41 @@ class GameUI:
 
         def _load_model(path: str) -> bool:
             try:
+                print(f"🔄 正在載入檢查點: {path}")
                 state = torch.load(path, map_location=trainer.device)
                 if isinstance(state, dict):
                     model_state = state.get("model_state", state)
+
+                    # 記錄載入前的權重（用於驗證）
+                    first_param_before = next(
+                        iter(trainer.net.parameters())
+                    ).data.clone()
+
                     trainer.net.load_state_dict(model_state)
+
+                    # 檢查載入後的權重是否改變
+                    first_param_after = next(iter(trainer.net.parameters())).data
+                    diff = (
+                        torch.abs(first_param_after - first_param_before).sum().item()
+                    )
+
+                    if diff > 1e-6:
+                        print(f"   ✅ 模型權重已成功載入 (權重差異: {diff:.2f})")
+                    else:
+                        print(f"   ⚠️  警告: 權重似乎未改變 (差異: {diff:.6f})")
+
                     opt_state = state.get("optimizer_state")
                     if opt_state is not None:
                         try:
                             trainer.opt.load_state_dict(opt_state)
+                            print("   ✅ 優化器狀態已載入")
                         except Exception:
-                            print("⚠️ 無法載入 optimizer_state，將重新初始化優化器")
+                            print("   ⚠️ 無法載入 optimizer_state，將重新初始化優化器")
                     return True
+                else:
+                    print("   ❌ 檢查點格式錯誤（不是字典）")
             except Exception as load_err:
-                print(f"載入模型失敗: {load_err}")
+                print(f"   ❌ 載入模型失敗: {load_err}")
             return False
 
         checkpoint_path = None
@@ -510,12 +532,31 @@ class GameUI:
         loaded = False
         if checkpoint_path is not None and not force_reset:
             self.ai_status = "loading"
+            print(f"\n{'='*60}")
+            print("📥 開始載入檢查點")
+            print(f"{'='*60}")
             loaded = _load_model(checkpoint_path)
+            if loaded:
+                print("✅ 檢查點載入成功！")
+            else:
+                print("❌ 檢查點載入失敗")
+            print(f"{'='*60}\n")
+
+        # 嘗試載入最佳檢查點（如果存在且未載入其他檢查點）
+        if not loaded and not force_reset:
+            best_checkpoint = os.path.join("checkpoints", "checkpoint_best.pt")
+            if os.path.exists(best_checkpoint):
+                self.ai_status = "loading"
+                print(f"\n💎 嘗試載入最佳檢查點: {best_checkpoint}")
+                loaded = _load_model(best_checkpoint)
+                if loaded:
+                    print("✅ 最佳檢查點載入成功！")
 
         if not loaded and not force_reset:
             model_path = os.path.join("checkpoints", "ppo_best.pth")
             if os.path.exists(model_path):
                 self.ai_status = "loading"
+                print(f"\n🔄 嘗試載入備用檢查點: {model_path}")
                 loaded = _load_model(model_path)
 
         if not loaded and force_reset:
