@@ -20,6 +20,7 @@ try:
     from torch.utils.tensorboard import SummaryWriter
 
     from agents.networks import ActorCritic
+    from agents.ppo_agent import PPOAgent
     from game.environment import GameEnv
 
     class PPOTrainer:
@@ -53,6 +54,13 @@ try:
             self.save_dir = save_dir
             os.makedirs(save_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
+
+        def build_agent(self):
+            agent = PPOAgent()
+            agent.net = self.net
+            agent.opt = self.opt
+            agent.device = self.device
+            return agent
 
         def collect_trajectory(self, envs=None, horizon=2048, stop_event=None):
             """Collect a `horizon`-length trajectory across one or more environments."""

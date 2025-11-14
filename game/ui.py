@@ -3,15 +3,30 @@ import math
 import os
 import sys
 import threading
-import time
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 import pygame
 
 from agents.ppo_agent import PPOAgent
+from agents.pytorch_trainer import PPOTrainer
+from game.ai_manager import AlgorithmDescriptor, AlgorithmManager, AlgorithmState
 from game.environment import GameEnv
-from game.training_window import TrainingWindow
+
+try:  # Optional advanced trainers
+    from agents.q_learning_trainer import QLearningTrainer
+except Exception:
+    QLearningTrainer = None
+
+try:
+    from agents.sac_trainer import SACTrainer
+except Exception:
+    SACTrainer = None
+
+try:
+    from agents.td3_trainer import TD3Trainer
+except Exception:
+    TD3Trainer = None
 
 
 class GameUI:
@@ -79,10 +94,10 @@ class GameUI:
             self.font = pygame.font.Font(None, 28)
             self.large_font = pygame.font.Font(None, 36)
 
-        self.training_iterations = 0
-        self.ai_round = 0
-        self.n = 0  # legacy counter used by export helpers
-        self.viewer_round = 0
+        self.ai_manager = AlgorithmManager()
+        self.algorithm_hotkeys = {}
+        self.algorithm_rects = {}
+        self._register_algorithms()
 
         # speed/parallel controls
         self._speed_options = [1, 2, 4, 8]
@@ -126,13 +141,8 @@ class GameUI:
         self.show_pause_menu = False  # 顯示暫停選單
 
         # 訓練視覺化視窗（暫不啟動第二個視窗，以免阻塞主畫面）
-        self.training_window = None
-
-        # AI 訓練狀態追蹤
-        self.agent_ready = False
         self.starting_ai = False
         self._ai_init_thread = None
-        self.ai_status = "idle"
 
         # leaderboard entries include training iteration metadata for AI scores
         self.leaderboard = [
@@ -150,17 +160,346 @@ class GameUI:
             pass
         self._sync_vector_env_index()
 
-        # loss history storage for visualization: dict of name -> list[float]
-        self.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
         # surface for small loss plot
         self.loss_surf_size = (self.panel.width - 40, 120)
         self.loss_surf = pygame.Surface(self.loss_surf_size)
 
-        # thread reference if trainer started
-        self.trainer_thread = None
-        self._trainer_stop_event = None
-        self.trainer = None
-        self.checkpoint_wait_seconds = 2.0
+    def _register_algorithms(self) -> None:
+        descriptors = [
+            AlgorithmDescriptor(
+                key="ppo",
+                name="PPO",
+                trainer_factory=PPOTrainer,
+                use_vector_envs=True,
+                vector_envs=4,
+                hotkey=pygame.K_1,
+                action_label="1",
+                color=(120, 200, 255),
+                window_title="PPO 訓練視窗",
+            )
+        ]
+
+        if SACTrainer is not None:
+            descriptors.append(
+                AlgorithmDescriptor(
+                    key="sac",
+                    name="SAC",
+                    trainer_factory=SACTrainer,
+                    use_vector_envs=False,
+                    vector_envs=1,
+                    hotkey=pygame.K_2,
+                    action_label="2",
+                    color=(180, 255, 180),
+                    window_title="SAC 訓練視窗",
+                )
+            )
+
+        if TD3Trainer is not None:
+            descriptors.append(
+                AlgorithmDescriptor(
+                    key="td3",
+                    name="TD3",
+                    trainer_factory=TD3Trainer,
+                    use_vector_envs=False,
+                    vector_envs=1,
+                    hotkey=pygame.K_3,
+                    action_label="3",
+                    color=(255, 200, 150),
+                    window_title="TD3 訓練視窗",
+                )
+            )
+
+        if QLearningTrainer is not None:
+            descriptors.append(
+                AlgorithmDescriptor(
+                    key="dqn",
+                    name="DQN",
+                    trainer_factory=lambda: QLearningTrainer(mode="dqn"),
+                    use_vector_envs=False,
+                    vector_envs=1,
+                    hotkey=pygame.K_4,
+                    action_label="4",
+                    color=(200, 180, 255),
+                    window_title="DQN 訓練視窗",
+                )
+            )
+            descriptors.append(
+                AlgorithmDescriptor(
+                    key="double_dqn",
+                    name="Double DQN",
+                    trainer_factory=lambda: QLearningTrainer(mode="double_dqn"),
+                    use_vector_envs=False,
+                    vector_envs=1,
+                    hotkey=pygame.K_5,
+                    action_label="5",
+                    color=(220, 160, 255),
+                    window_title="Double DQN 訓練視窗",
+                )
+            )
+
+        for desc in descriptors:
+            self.ai_manager.register(desc)
+            if desc.hotkey is not None:
+                self.algorithm_hotkeys[desc.hotkey] = desc.key
+
+    def _active_slot(self) -> Optional[AlgorithmState]:
+        return self.ai_manager.active_state()
+
+    def _slot_attr(self, attr: str, default=None):
+        slot = self._active_slot()
+        if slot is None:
+            return default
+        return getattr(slot, attr, default)
+
+    def _set_slot_attr(self, attr: str, value) -> None:
+        slot = self._active_slot()
+        if slot is not None:
+            setattr(slot, attr, value)
+
+    @property
+    def training_iterations(self) -> int:
+        value = self._slot_attr("iterations", 0)
+        return int(value or 0)
+
+    @training_iterations.setter
+    def training_iterations(self, value: int) -> None:
+        self._set_slot_attr("iterations", int(max(0, value)))
+
+    @property
+    def ai_round(self) -> int:
+        value = self._slot_attr("ai_round", 0)
+        return int(value or 0)
+
+    @ai_round.setter
+    def ai_round(self, value: int) -> None:
+        self._set_slot_attr("ai_round", int(max(0, value)))
+
+    @property
+    def n(self) -> int:
+        value = self._slot_attr("n", 0)
+        return int(value or 0)
+
+    @n.setter
+    def n(self, value: int) -> None:
+        self._set_slot_attr("n", int(max(0, value)))
+
+    @property
+    def viewer_round(self) -> int:
+        value = self._slot_attr("viewer_round", 0)
+        return int(value or 0)
+
+    @viewer_round.setter
+    def viewer_round(self, value: int) -> None:
+        self._set_slot_attr("viewer_round", int(max(0, value)))
+
+    @property
+    def ai_status(self) -> str:
+        return self._slot_attr("status", "idle") or "idle"
+
+    @ai_status.setter
+    def ai_status(self, value: str) -> None:
+        self._set_slot_attr("status", str(value))
+
+    @property
+    def agent_ready(self) -> bool:
+        return bool(self._slot_attr("agent_ready", False))
+
+    @agent_ready.setter
+    def agent_ready(self, value: bool) -> None:
+        self._set_slot_attr("agent_ready", bool(value))
+
+    # ------------------------------------------------------------------
+    # Algorithm management helpers
+    # ------------------------------------------------------------------
+
+    def _set_active_algorithm(self, key: str) -> None:
+        try:
+            slot = self.ai_manager.state(key)
+        except KeyError:
+            return
+
+        try:
+            self.ai_manager.set_active(key)
+        except KeyError:
+            return
+
+        if slot is None:
+            return
+
+        self.agent = slot.agent
+        self.agent_ready = bool(slot.agent_ready)
+        self.ai_status = slot.status or "idle"
+        self.latest_metrics = dict(slot.latest_metrics)
+        self.current_score = 0.0
+        self.last_ai_action = None
+        self.last_ai_action_prob = 0.0
+        self.last_ai_value = 0.0
+
+    def _handle_algorithm_toggle(self, key: str, *, force_reset: bool = False) -> None:
+        if key != self.ai_manager.active_key:
+            self._set_active_algorithm(key)
+        slot = self._active_slot()
+        if slot is None or slot.descriptor.key != key:
+            return
+
+        running = slot.trainer_thread is not None and slot.trainer_thread.is_alive()
+        if running:
+            print(f"🛑 停止 {slot.descriptor.name} 訓練")
+            self.ai_manager.stop(key, wait=True)
+            if key == self.ai_manager.active_key:
+                self.agent_ready = False
+                self.ai_status = "idle"
+        else:
+            print(f"🚀 啟動 {slot.descriptor.name} 訓練")
+            self._start_algorithm_training(
+                key=key, force_reset=force_reset, async_mode=False
+            )
+
+    def _stop_algorithm_training(
+        self, key: Optional[str] = None, wait: bool = True
+    ) -> None:
+        target = key or self.ai_manager.active_key
+        if target is None:
+            return
+        self.ai_manager.stop(target, wait=wait)
+        if target == self.ai_manager.active_key:
+            self.agent_ready = False
+            self.ai_status = "idle"
+
+    def _start_algorithm_training(
+        self,
+        key: Optional[str] = None,
+        *,
+        force_reset: bool = False,
+        async_mode: bool = False,
+    ) -> None:
+        target_key = key or self.ai_manager.active_key
+        if target_key is None:
+            print("⚠️ 尚未選擇任何演算法，無法啟動訓練。")
+            return
+
+        try:
+            slot = self.ai_manager.state(target_key)
+        except KeyError:
+            print(f"⚠️ 找不到演算法 {target_key}")
+            return
+
+        if slot.trainer_thread is not None and slot.trainer_thread.is_alive():
+            if target_key == self.ai_manager.active_key:
+                self.agent = slot.agent
+                self.agent_ready = slot.agent_ready
+            return
+
+        def _setup_callback(state: AlgorithmState) -> None:
+            if state.descriptor.key == "ppo":
+                self._prepare_ppo_resume(state, force_reset=force_reset)
+            elif force_reset:
+                state.iterations = 0
+                state.ai_round = 0
+                state.n = 0
+
+        vector_override = None
+        if slot.descriptor.use_vector_envs:
+            vector_override = self.vector_envs
+
+        def _runner():
+            try:
+                self.ai_manager.start(
+                    key=target_key,
+                    env_factory=GameEnv,
+                    metrics_consumer=self._handle_metrics_from_manager,
+                    force_reset=force_reset,
+                    setup_callback=_setup_callback,
+                    vector_env_override=vector_override,
+                )
+                if target_key == self.ai_manager.active_key:
+                    self.agent = slot.agent
+                    self.agent_ready = slot.agent_ready
+                    self.ai_status = slot.status
+            finally:
+                if async_mode:
+                    self.starting_ai = False
+
+        if async_mode:
+            threading.Thread(target=_runner, daemon=True).start()
+        else:
+            _runner()
+
+    def _handle_metrics_from_manager(self, key: str, metrics: Dict[str, float]) -> None:
+        if key == self.ai_manager.active_key:
+            with self._lock:
+                self.latest_metrics = dict(metrics)
+
+    def _prepare_ppo_resume(
+        self, slot: AlgorithmState, *, force_reset: bool = False
+    ) -> None:
+        trainer = slot.trainer
+        agent = slot.agent
+        if trainer is None or agent is None:
+            return
+        if not isinstance(trainer, PPOTrainer):
+            return
+
+        try:
+            import torch
+        except Exception:
+            print("⚠️ 找不到 PyTorch，無法載入 PPO 模型。")
+            return
+
+        def _load_model(path: str) -> bool:
+            try:
+                state = torch.load(path, map_location=trainer.device)
+                if isinstance(state, dict):
+                    model_state = state.get("model_state", state)
+                    trainer.net.load_state_dict(model_state)
+                    opt_state = state.get("optimizer_state")
+                    if opt_state is not None:
+                        try:
+                            trainer.opt.load_state_dict(opt_state)
+                        except Exception:
+                            print("⚠️ 無法載入 optimizer_state，將重新初始化優化器")
+                    return True
+            except Exception as load_err:
+                print(f"載入模型失敗: {load_err}")
+            return False
+
+        checkpoint_path = None
+        if not force_reset and self.training_iterations > 0:
+            candidate = os.path.join(
+                "checkpoints", f"checkpoint_{self.training_iterations}.pt"
+            )
+            if os.path.exists(candidate):
+                checkpoint_path = candidate
+
+        if checkpoint_path is None and not force_reset:
+            latest_path, latest_iter = self._latest_checkpoint()
+            if latest_path is not None:
+                checkpoint_path = latest_path
+                if (
+                    isinstance(latest_iter, int)
+                    and latest_iter > self.training_iterations
+                ):
+                    self.training_iterations = latest_iter
+                    self.n = latest_iter
+
+        loaded = False
+        if checkpoint_path is not None and not force_reset:
+            self.ai_status = "loading"
+            loaded = _load_model(checkpoint_path)
+
+        if not loaded and not force_reset:
+            model_path = os.path.join("checkpoints", "ppo_best.pth")
+            if os.path.exists(model_path):
+                self.ai_status = "loading"
+                loaded = _load_model(model_path)
+
+        if not loaded and force_reset:
+            self.training_iterations = 0
+            self.n = 0
+            slot.ai_round = 0
+
+        slot.agent = agent
+        slot.trainer = trainer
 
     def _update_layout(self, width: int, height: int) -> None:
         width = int(max(self.min_width, width))
@@ -239,10 +578,17 @@ class GameUI:
         self._sync_vector_env_index()
         print(f"訓練並行環境數設定為 {self.vector_envs}")
         try:
-            self._save_training_meta(self.training_iterations, self.ai_round)
+            slot = self._active_slot()
+            if slot is not None:
+                self._save_training_meta(slot.iterations, slot.ai_round)
         except Exception:
             pass
-        if self.trainer_thread is not None and self.trainer_thread.is_alive():
+        slot = self._active_slot()
+        if (
+            slot is not None
+            and slot.trainer_thread is not None
+            and slot.trainer_thread.is_alive()
+        ):
             print("⚠️ 目前訓練仍在進行，新設定將於下次初始化生效。")
 
     def draw_playfield(self, state):
@@ -360,6 +706,91 @@ class GameUI:
         hint_x = self.play_area.left + (self.play_area.width - hint.get_width()) // 2
         self.screen.blit(hint, (hint_x, self.play_area.bottom - 60))
 
+    def _draw_algorithm_panel(self, top: int) -> int:
+        keys = self.ai_manager.keys()
+        if not keys:
+            return top
+
+        x = self.panel.left + 20
+        width = self.panel.width - 40
+        y = max(top, self.btn_parallel.bottom + 16)
+
+        title = self.font.render("演算法控制 (按數字鍵切換)", True, (180, 200, 255))
+        self.screen.blit(title, (x, y))
+        y += title.get_height() + 6
+
+        entry_height = 56
+        spacing = 10
+        self.algorithm_rects = {}
+
+        for key in keys:
+            desc = self.ai_manager.descriptor(key)
+            slot = self.ai_manager.state(key)
+            if slot is None:
+                continue
+            rect = pygame.Rect(x, y, width, entry_height)
+            active = key == self.ai_manager.active_key
+            running = slot.trainer_thread is not None and slot.trainer_thread.is_alive()
+            base_color = desc.color
+            bg = tuple(int(c * (1.0 if active else 0.6)) for c in base_color)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+
+            outline_color = (240, 240, 255) if active else (120, 130, 150)
+            pygame.draw.rect(self.screen, outline_color, rect, 2, border_radius=8)
+
+            label = (
+                f"[{desc.action_label}] {desc.name}" if desc.action_label else desc.name
+            )
+            label_surface = self.font.render(label, True, (20, 20, 30))
+            status_map = {
+                "initializing": "初始化",
+                "loading": "載入中",
+                "training": "訓練中",
+                "saving": "儲存中",
+                "saved": "已儲存",
+                "resetting": "重設",
+                "error": "錯誤",
+                "idle": "待命",
+            }
+            status_text = status_map.get(slot.status, slot.status)
+            status_color = (30, 50, 70) if active else (40, 50, 60)
+            status_surface = self.font.render(
+                f"狀態: {status_text}", True, status_color
+            )
+
+            metric_text = f"迭代 {slot.iterations:,} 次"
+            metric_surface = self.font.render(metric_text, True, status_color)
+
+            self.screen.blit(label_surface, (rect.x + 14, rect.y + 6))
+            self.screen.blit(status_surface, (rect.x + 14, rect.y + 24))
+            self.screen.blit(
+                metric_surface, (rect.x + 14, rect.y + 42 - metric_surface.get_height())
+            )
+
+            toggle_rect = pygame.Rect(
+                rect.right - 84, rect.y + 10, 70, rect.height - 20
+            )
+            toggle_color = (230, 120, 120) if running else (120, 200, 140)
+            toggle_label = "停止" if running else "啟動"
+            pygame.draw.rect(self.screen, toggle_color, toggle_rect, border_radius=6)
+            btn_text = self.font.render(toggle_label, True, (0, 0, 0))
+            self.screen.blit(
+                btn_text,
+                (
+                    toggle_rect.centerx - btn_text.get_width() // 2,
+                    toggle_rect.centery - btn_text.get_height() // 2,
+                ),
+            )
+
+            self.algorithm_rects[key] = {
+                "select": rect,
+                "toggle": toggle_rect,
+            }
+
+            y += entry_height + spacing
+
+        return y
+
     def draw_panel(self):
         """繪製簡化的側邊面板（只顯示基本信息）"""
         if self.mode == "AI" and self.running:
@@ -410,6 +841,9 @@ class GameUI:
             hint_y = min(hint_y, max(self.btn_parallel.bottom + 4, reserve_y))
         self.screen.blit(hint_surface, (self.panel.left + 24, hint_y))
 
+        algo_top = hint_y + hint_surface.get_height() + 12
+        algo_bottom = self._draw_algorithm_panel(algo_top)
+
         if self.btn_save is not None:
             pygame.draw.rect(self.screen, (90, 90, 100), self.btn_save, border_radius=8)
             save_surface = self.font.render("儲存訓練", True, (235, 235, 235))
@@ -422,7 +856,7 @@ class GameUI:
             )
 
         # mode indicator & current score - 使用更大的間距
-        info_y = hint_y + hint_surface.get_height() + 20
+        info_y = max(algo_bottom + 10, hint_y + hint_surface.get_height() + 20)
         mode_map = {"Human": "人類", "AI": "AI 訓練", "Menu": "選單", "Board": "排行榜"}
         mode_name = mode_map.get(self.mode, str(self.mode))
         mode_text = self.large_font.render("模式", True, (150, 150, 160))
@@ -541,6 +975,7 @@ class GameUI:
         sorted_entries = sorted(
             self.leaderboard, key=lambda x: x.get("score", 0), reverse=True
         )
+        lb_entries = min(len(sorted_entries), 5)
         for idx, entry in enumerate(sorted_entries[:5]):
             name = entry.get("name", "-")
             score = int(entry.get("score", 0))
@@ -557,6 +992,16 @@ class GameUI:
                 rank_text += f" (第{iteration:,}次訓練)"
             t = self.font.render(rank_text, True, (180, 180, 200))
             self.screen.blit(t, (self.panel.left + 25, lb_top + 40 + idx * 28))
+
+        lb_bottom = lb_top + 40 + lb_entries * 28
+
+        plot_w, plot_h = self.loss_surf_size
+        plot_x = self.panel.left + 20
+        content_anchor = max(algo_bottom + 20, ai_info_bottom + 20, lb_bottom + 20)
+        max_y = self.panel.bottom - plot_h - 20
+        if max_y > self.panel.top + 40 and max_y >= content_anchor:
+            plot_y = max(content_anchor, self.panel.top + 40)
+            self._draw_loss_plot(plot_x, int(plot_y), int(plot_w), int(plot_h))
 
         # 如果在選單模式，在遊玩區域顯示提示
         if not self.running:
@@ -696,119 +1141,8 @@ class GameUI:
 
         def _worker():
             try:
-                import os
-
-                from agents.pytorch_trainer import PPOTrainer
-
-                # 如果訓練器已在運行，不要重複初始化
-                if self.trainer_thread is not None and self.trainer_thread.is_alive():
-                    print("AI 訓練已在背景運行中")
-                    if self.agent is not None:
-                        self.agent_ready = True
-                        self.ai_status = "training"
-                    return
-
-                # 創建訓練器
-                trainer = PPOTrainer()
-
-                # 檢查是否有既有模型
-                model_path = os.path.join("checkpoints", "ppo_best.pth")
-                checkpoint_path = None
-                if not force_reset and self.training_iterations > 0:
-                    candidate = os.path.join(
-                        "checkpoints", f"checkpoint_{self.training_iterations}.pt"
-                    )
-                    if os.path.exists(candidate):
-                        checkpoint_path = candidate
-                if not force_reset and checkpoint_path is None:
-                    latest_path, latest_iter = self._latest_checkpoint()
-                    if latest_path is not None:
-                        checkpoint_path = latest_path
-                        if (
-                            isinstance(latest_iter, int)
-                            and latest_iter > self.training_iterations
-                        ):
-                            self.training_iterations = latest_iter
-                            self.n = self.training_iterations
-                if (
-                    not force_reset
-                    and checkpoint_path is None
-                    and os.path.exists(model_path)
-                ):
-                    checkpoint_path = model_path
-
-                agent = PPOAgent()
-
-                def _load_model(path: str) -> bool:
-                    try:
-                        import torch
-
-                        state = torch.load(path, map_location=trainer.device)
-                        if isinstance(state, dict):
-                            model_state = state.get("model_state", state)
-                            agent.net.load_state_dict(model_state)
-                            opt_state = state.get("optimizer_state")
-                            if opt_state is not None:
-                                try:
-                                    trainer.opt.load_state_dict(opt_state)
-                                except Exception:
-                                    print(
-                                        "⚠️ 無法載入 optimizer_state，將重新初始化優化器"
-                                    )
-                            print(f"✅ 已載入預訓練模型: {path}")
-                            return True
-                        print(f"⚠️ 模型檔案格式異常：{path}")
-                    except Exception as load_err:
-                        print(f"載入預訓練模型失敗：{load_err}")
-                    return False
-
-                loaded = False
-                if checkpoint_path is not None and not force_reset:
-                    self.ai_status = "loading"
-                    loaded = _load_model(checkpoint_path)
-
-                if not force_reset and not loaded:
-                    print("未找到現有模型，稍候將從頭開始訓練...")
-                    self.ai_status = "loading"
-                    time.sleep(self.checkpoint_wait_seconds)
-                    latest_path, latest_iter = self._latest_checkpoint()
-                    if latest_path is not None:
-                        if (
-                            isinstance(latest_iter, int)
-                            and latest_iter > self.training_iterations
-                        ):
-                            self.training_iterations = latest_iter
-                            self.n = self.training_iterations
-                        loaded = _load_model(latest_path)
-
-                if not loaded:
-                    # 強制重設或確實沒有找到任何檔案
-                    self.training_iterations = 0
-                    self.n = 0
-
-                # 讓 UI 的 agent 與訓練器共享網絡與優化器
-                agent.net = trainer.net
-                agent.opt = trainer.opt
-                agent.device = trainer.device
-
-                self.agent = agent
-                self.agent_ready = True
-                self.ai_status = "training"
-                self.trainer = trainer
-
-                if self.training_window is None:
-                    self.training_window = TrainingWindow()
-                self.training_window.start()
-
-                # 啟動背景訓練（使用獨立環境，避免與 UI 衝突）
-                env_count = max(1, int(self.vector_envs))
-                training_envs = [GameEnv() for _ in range(env_count)]
-                self.start_trainer(
-                    trainer,
-                    total_timesteps=None,
-                    envs=training_envs,
-                    log_interval=10,
-                    initial_iteration=0 if force_reset else self.training_iterations,
+                self._start_algorithm_training(
+                    force_reset=force_reset, async_mode=False
                 )
             except Exception as exc:
                 print(f"AI 訓練初始化失敗：{exc}")
@@ -841,14 +1175,6 @@ class GameUI:
                 self.agent = None
                 self.agent_ready = False
                 self.ai_status = "idle"
-                # 停止訓練器（如果正在運行）
-                if self.trainer_thread is not None and self.trainer_thread.is_alive():
-                    print("正在停止訓練器...")
-                    self.stop_trainer(wait=False, timeout=2.0)
-                # 關閉訓練視窗（如果有）
-                if self.training_window is not None:
-                    self.training_window.stop()
-                    self.training_window = None
                 return self.env.reset()
             return None
 
@@ -867,14 +1193,6 @@ class GameUI:
                 self.agent = None
                 self.agent_ready = False
                 self.ai_status = "idle"
-                # 停止訓練器（如果正在運行）
-                if self.trainer_thread is not None and self.trainer_thread.is_alive():
-                    print("正在停止訓練器...")
-                    self.stop_trainer(wait=False, timeout=2.0)
-                # 關閉訓練視窗（如果有）
-                if self.training_window is not None:
-                    self.training_window.stop()
-                    self.training_window = None
                 return self.env.reset()
             return None
 
@@ -893,6 +1211,17 @@ class GameUI:
         if self.btn_parallel.collidepoint(pos):
             self._handle_cycle_parallel_envs()
             return None
+
+        # Algorithm selection / toggle
+        for key, rects in self.algorithm_rects.items():
+            toggle_rect = rects.get("toggle")
+            select_rect = rects.get("select")
+            if toggle_rect is not None and toggle_rect.collidepoint(pos):
+                self._handle_algorithm_toggle(key)
+                return None
+            if select_rect is not None and select_rect.collidepoint(pos):
+                self._set_active_algorithm(key)
+                return None
 
         # If not running, these buttons start a run
         if not self.running and self.btn_human.collidepoint(pos):
@@ -944,16 +1273,22 @@ class GameUI:
         print("📝 儲存訓練進度中...")
         self.ai_status = "saving"
 
+        slot = self._active_slot()
+        if slot is None or slot.trainer is None:
+            print("⚠️ 目前沒有可儲存的訓練器")
+            return None
+
         # 停止訓練視窗以避免與 checkpoint 寫入衝突
-        if self.training_window is not None:
-            self.training_window.stop()
-            self.training_window = None
+        if slot.training_window is not None:
+            slot.training_window.stop()
+            slot.training_window = None
 
-        trainer_ref = self.trainer
-        # 停止背景訓練線程
-        if self.trainer_thread is not None and self.trainer_thread.is_alive():
-            self.stop_trainer(wait=True, timeout=5.0)
+        if slot.stop_event is not None:
+            slot.stop_event.set()
+        if slot.trainer_thread is not None and slot.trainer_thread.is_alive():
+            slot.trainer_thread.join(timeout=5.0)
 
+        trainer_ref = slot.trainer
         checkpoint_path = None
         base_iteration = self.training_iterations or self.n or 0
         iteration = int(max(0, base_iteration))
@@ -967,6 +1302,8 @@ class GameUI:
 
         if trainer_ref is not None or iteration > 0 or self.ai_round > 0:
             self._save_training_meta(iteration, self.ai_round)
+
+        self._stop_algorithm_training(wait=True)
 
         # 返回主選單狀態
         self.running = False
@@ -1003,6 +1340,10 @@ class GameUI:
         self.last_ai_action_prob = 0.0
         self.last_ai_value = 0.0
 
+        slot = self._active_slot()
+        if slot is None:
+            return None
+
         if self.mode == "AI" and self.running:
             self.running = False
             self.current_score = 0.0
@@ -1012,21 +1353,14 @@ class GameUI:
                 pass
             self.mode = "Menu"
 
-        # 停止任何背景訓練
-        if self.trainer_thread is not None and self.trainer_thread.is_alive():
-            self.stop_trainer(wait=True, timeout=5.0)
-        if self.training_window is not None:
-            self.training_window.stop()
-            self.training_window = None
-
-        self.trainer = None
+        # 停止任何背景訓練並重置狀態
+        self._stop_algorithm_training(wait=True)
         self.agent = None
 
-        # 重置計數器
-        self.training_iterations = 0
-        self.ai_round = 0
-        self.n = 0
-        self.viewer_round = 0
+        slot.iterations = 0
+        slot.ai_round = 0
+        slot.n = 0
+        slot.viewer_round = 0
         try:
             self._save_training_meta(0, 0)
         except Exception:
@@ -1047,8 +1381,16 @@ class GameUI:
         pygame.draw.rect(surf, (24, 24, 28), (0, 0, w, h))
 
         # determine max length among series (thread-safe copy)
+        slot = self._active_slot()
+        if slot is None:
+            self.screen.blit(surf, (x, y))
+            return
         with self._lock:
-            lh_copy = {k: list(v) for k, v in self.loss_history.items()}
+            lh_copy = {k: list(v) for k, v in slot.loss_history.items()}
+
+        algo_name = slot.descriptor.name if slot.descriptor else "訓練"
+        title = self.font.render(f"{algo_name} Loss 趨勢", True, (190, 200, 240))
+        surf.blit(title, (8, 6))
 
         max_len = 0
         for v in lh_copy.values():
@@ -1058,7 +1400,7 @@ class GameUI:
         if max_len < 2:
             # draw a hint text
             hint = self.font.render("等待 Loss 數據中...", True, (150, 150, 150))
-            surf.blit(hint, (6, 6))
+            surf.blit(hint, (8, title.get_height() + 10))
             self.screen.blit(surf, (x, y))
             return
 
@@ -1071,7 +1413,7 @@ class GameUI:
         }
 
         # 繪製圖例
-        legend_y = 5
+        legend_y = title.get_height() + 10
         for name, color in series_colors.items():
             label = self.font.render(name.capitalize(), True, color)
             surf.blit(label, (w - label.get_width() - 5, legend_y))
@@ -1237,18 +1579,40 @@ class GameUI:
         except Exception:
             return
 
-        try:
-            last_it = int(data.get("last_iteration", self.training_iterations))
-            self.training_iterations = max(self.training_iterations, last_it)
-            self.n = self.training_iterations
-        except Exception:
-            pass
+        algorithms_meta = data.get("algorithms")
+        if isinstance(algorithms_meta, dict):
+            for key, meta in algorithms_meta.items():
+                try:
+                    slot = self.ai_manager.state(key)
+                except KeyError:
+                    continue
+                try:
+                    slot.iterations = int(meta.get("iteration", slot.iterations))
+                    slot.n = slot.iterations
+                except Exception:
+                    pass
+                try:
+                    slot.ai_round = int(meta.get("episodes", slot.ai_round))
+                except Exception:
+                    pass
+                try:
+                    slot.viewer_round = int(meta.get("viewer_round", slot.viewer_round))
+                except Exception:
+                    pass
+        else:
+            # backward compatibility with legacy schema
+            try:
+                last_it = int(data.get("last_iteration", self.training_iterations))
+                self.training_iterations = max(self.training_iterations, last_it)
+                self.n = self.training_iterations
+            except Exception:
+                pass
 
-        try:
-            total_eps = int(data.get("total_episodes", self.ai_round))
-            self.ai_round = max(self.ai_round, total_eps)
-        except Exception:
-            pass
+            try:
+                total_eps = int(data.get("total_episodes", self.ai_round))
+                self.ai_round = max(self.ai_round, total_eps)
+            except Exception:
+                pass
 
         try:
             stored_envs = int(data.get("vector_envs", self.vector_envs))
@@ -1256,15 +1620,29 @@ class GameUI:
         except Exception:
             pass
 
+        active_key = data.get("active")
+        if isinstance(active_key, str):
+            self._set_active_algorithm(active_key)
+
         self._sync_vector_env_index()
 
     def _save_training_meta(self, iteration: int, episodes: int) -> None:
+        """暫存訓練統計資訊（向後兼容舊結構）。"""
         path = os.path.join("checkpoints", "training_meta.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        snapshot = {}
+        for key, slot in self.ai_manager.agents_snapshot().items():
+            snapshot[key] = {
+                "iteration": int(max(0, slot.iterations)),
+                "episodes": int(max(0, slot.ai_round)),
+                "viewer_round": int(max(0, slot.viewer_round)),
+            }
+
         payload = {
-            "last_iteration": int(max(0, iteration)),
-            "total_episodes": int(max(0, episodes)),
+            "algorithms": snapshot,
             "vector_envs": int(max(1, self.vector_envs)),
+            "active": self.ai_manager.active_key,
             "saved_at": datetime.utcnow().isoformat() + "Z",
         }
         try:
@@ -1299,129 +1677,6 @@ class GameUI:
                 self.training_iterations = latest_iter
                 self.n = latest_iter
 
-    # --- trainer/metrics API ---
-    def update_losses(self, metrics: dict):
-        """Receive metrics from the trainer thread.
-
-        Expected keys include: it, loss, policy_loss, value_loss, entropy,
-        timesteps, mean_reward, episode_count.
-        """
-        if not isinstance(metrics, dict):
-            return
-        with self._lock:
-            # keep simple series, append floats if present
-            try:
-                if metrics.get("policy_loss") is not None:
-                    self.loss_history.setdefault("policy", []).append(
-                        float(metrics.get("policy_loss"))
-                    )
-                if metrics.get("value_loss") is not None:
-                    self.loss_history.setdefault("value", []).append(
-                        float(metrics.get("value_loss"))
-                    )
-                if metrics.get("entropy") is not None:
-                    self.loss_history.setdefault("entropy", []).append(
-                        float(metrics.get("entropy"))
-                    )
-                if metrics.get("loss") is not None:
-                    self.loss_history.setdefault("total", []).append(
-                        float(metrics.get("loss"))
-                    )
-
-                # store latest metrics for numeric display
-                self.latest_metrics.update(
-                    {
-                        k: metrics.get(k)
-                        for k in (
-                            "it",
-                            "loss",
-                            "policy_loss",
-                            "value_loss",
-                            "entropy",
-                            "timesteps",
-                            "mean_reward",
-                            "episode_count",
-                        )
-                    }
-                )
-
-                it_value = metrics.get("it")
-                if it_value is not None:
-                    try:
-                        it_int = int(it_value)
-                        if it_int > self.training_iterations:
-                            self.training_iterations = it_int
-                        self.n = self.training_iterations
-                    except Exception:
-                        pass
-
-                episode_count = metrics.get("episode_count")
-                if episode_count is not None:
-                    try:
-                        self.ai_round += int(episode_count)
-                    except Exception:
-                        pass
-            except Exception:
-                # keep training robust to odd metric values
-                pass
-
-        # 更新訓練視覺化視窗（如果已啟動）
-        if self.training_window is not None:
-            weights = None
-            if self.agent is not None and hasattr(self.agent, "net"):
-                get_weights = getattr(self.agent.net, "get_weight_matrix", None)
-                if callable(get_weights):
-                    try:
-                        weights = get_weights()
-                    except Exception:
-                        weights = None
-            self.training_window.update_data(metrics, weights=weights)
-
-    def start_trainer(self, trainer, **train_kwargs):
-        """Launch trainer.train(...) on a daemon thread.
-
-        Metrics are relayed back into update_losses.
-        Example:
-            ui.start_trainer(trainer, total_timesteps=5000, env=env)
-        """
-        if self.trainer_thread is not None and self.trainer_thread.is_alive():
-            # already running
-            return
-
-        self.trainer = trainer
-
-        # create a stop event and run trainer in a non-daemon thread so we can join
-        stop_event = threading.Event()
-        self._trainer_stop_event = stop_event
-
-        def _runner():
-            try:
-                trainer.train(
-                    metrics_callback=self.update_losses,
-                    stop_event=stop_event,
-                    **train_kwargs,
-                )
-            except Exception:
-                # swallow to avoid killing the UI thread
-                pass
-
-        t = threading.Thread(target=_runner, daemon=False)
-        t.start()
-        self.trainer_thread = t
-
-    def stop_trainer(self, wait=True, timeout=None):
-        """Signal the background trainer to stop and optionally join the thread."""
-        if self._trainer_stop_event is None:
-            return
-        try:
-            self._trainer_stop_event.set()
-            if wait and self.trainer_thread is not None:
-                self.trainer_thread.join(timeout)
-        finally:
-            self._trainer_stop_event = None
-            self.trainer_thread = None
-            self.trainer = None
-
     def run(self):
         s = self.env.reset()
         running = True
@@ -1452,6 +1707,9 @@ class GameUI:
                         and not self.game_over
                     ):
                         self.human_jump = True
+                    elif event.key in self.algorithm_hotkeys:
+                        key = self.algorithm_hotkeys[event.key]
+                        self._set_active_algorithm(key)
 
             # if not running (menu mode), only render and wait for user to click start
             if not self.running:
@@ -1530,10 +1788,12 @@ class GameUI:
                     except Exception:
                         pass
                 else:
-                    name = "AI"
+                    slot = self._active_slot()
+                    algo_name = slot.descriptor.name if slot is not None else "AI"
+                    name = f"AI-{algo_name}"
                     score = int(self.current_score)
                     iteration_idx = int(self.training_iterations)
-                    note_text = f"(第{iteration_idx:,}次訓練)"
+                    note_text = f"{algo_name} 第{iteration_idx:,}次訓練"
                     self.leaderboard.append(
                         {
                             "name": name,
@@ -1576,16 +1836,8 @@ class GameUI:
             pygame.display.flip()
             self.clock.tick(self.FPS)
 
-        # 清理：停止訓練器（如果正在運行）
-        if self.trainer_thread is not None and self.trainer_thread.is_alive():
-            print("正在停止訓練器...")
-            self.stop_trainer(wait=True, timeout=5.0)
-
-        # 清理：關閉訓練視覺化視窗
-        if self.training_window is not None:
-            self.training_window.stop()
-            self.training_window = None
-
+        # 清理：停止所有訓練
+        self.ai_manager.stop_all()
         self.agent = None
         self.agent_ready = False
         self.ai_status = "idle"

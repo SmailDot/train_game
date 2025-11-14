@@ -326,7 +326,7 @@ def _draw_losses(
             surface.blit(label, (x - label.get_width() // 2, plot.bottom + 4))
 
 
-def _training_window_process(queue_: Queue, stop_event: Event, width: int, height: int):
+def _training_window_process(queue_, stop_event, width: int, height: int, title: str):
     os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
 
     import pygame
@@ -337,7 +337,8 @@ def _training_window_process(queue_: Queue, stop_event: Event, width: int, heigh
     width = max(min_width, width)
     height = max(min_height, height)
     screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
-    pygame.display.set_caption(f"AI Training Visualization ({width}x{height})")
+    base_title = title or "AI Training Visualization"
+    pygame.display.set_caption(f"{base_title} ({width}x{height})")
     clock = pygame.time.Clock()
 
     fonts = _prepare_fonts(pygame)
@@ -354,9 +355,7 @@ def _training_window_process(queue_: Queue, stop_event: Event, width: int, heigh
                 width = max(min_width, event.w)
                 height = max(min_height, event.h)
                 screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
-                pygame.display.set_caption(
-                    f"AI Training Visualization ({width}x{height})"
-                )
+                pygame.display.set_caption(f"{base_title} ({width}x{height})")
 
         try:
             while True:
@@ -385,10 +384,11 @@ class TrainingWindow:
     WIDTH = 960
     HEIGHT = 720
 
-    def __init__(self) -> None:
+    def __init__(self, title: Optional[str] = None) -> None:
         self._queue = Queue(maxsize=10)
         self._stop_event = Event()
         self._process: Optional[Process] = None
+        self._title = title or "AI Training Visualization"
 
     def start(self) -> None:
         if self._process is not None and self._process.is_alive():
@@ -396,7 +396,7 @@ class TrainingWindow:
         self._stop_event.clear()
         process = Process(
             target=_training_window_process,
-            args=(self._queue, self._stop_event, self.WIDTH, self.HEIGHT),
+            args=(self._queue, self._stop_event, self.WIDTH, self.HEIGHT, self._title),
             name="TrainingWindow",
             daemon=True,
         )
