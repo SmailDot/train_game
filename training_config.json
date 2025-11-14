@@ -1,6 +1,5 @@
 {
     "_comment": "訓練參數配置文件 - 可在訓練過程中修改（每10個迭代重新讀取）",
-    
     "lr_scheduler": {
         "_comment": "學習率調度器 - 自動調整學習率以提升訓練效果",
         "type": "adaptive",
@@ -29,7 +28,6 @@
         "eta_min": 1e-6,
         "_eta_min_comment": "（cosine模式）最小學習率"
     },
-    
     "gpu_training": {
         "batch_size": 256,
         "ppo_epochs": 10,

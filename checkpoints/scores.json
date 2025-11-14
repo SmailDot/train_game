@@ -1,302 +1,302 @@
 [
   {
-    "name": "AI",
-    "score": 75,
-    "iteration": 3874,
-    "note": "(第3,874次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 60,
-    "iteration": 3815,
-    "note": "(第3,815次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 55,
-    "iteration": 3739,
-    "note": "(第3,739次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 50,
-    "iteration": 3554,
-    "note": "(第3,554次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 50,
-    "iteration": 3787,
-    "note": "(第3,787次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 45,
-    "iteration": 3695,
-    "note": "(第3,695次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": 4358,
-    "note": "(第4,358次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 40,
-    "iteration": 4361,
-    "note": "(第4,361次訓練)"
-  },
-  {
-    "name": "人類",
-    "score": 40,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 35,
-    "iteration": 4354,
-    "note": "(第4,354次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 20,
-    "iteration": 4225,
-    "note": "(第4,225次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 20,
-    "iteration": 4331,
-    "note": "(第4,331次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 20,
-    "iteration": 4350,
-    "note": "(第4,350次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 15,
-    "iteration": 1137,
-    "note": "(第1,137次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 15,
-    "iteration": 1183,
-    "note": "(第1,183次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 15,
-    "iteration": 1247,
-    "note": "(第1,247次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 15,
-    "iteration": 4255,
-    "note": "(第4,255次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 15,
-    "iteration": 532,
-    "note": "(第532次訓練)"
-  },
-  {
-    "name": "人類",
-    "score": 15,
-    "iteration": null,
-    "note": null
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 360,
-    "note": "(第360次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 765,
-    "note": "(第765次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 875,
-    "note": "(第875次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 1016,
-    "note": "(第1,016次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 4254,
-    "note": "(第4,254次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 4368,
-    "note": "(第4,368次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 256,
-    "note": "(第256次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 769,
-    "note": "(第769次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 10,
-    "iteration": 1094,
-    "note": "(第1,094次訓練)"
-  },
-  {
-    "name": "人類",
-    "score": 10,
-    "iteration": null,
-    "note": null
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2252,
+    "note": "PPO 第2,252次訓練"
   },
   {
     "name": "AI-PPO",
-    "score": 10,
-    "iteration": 730,
-    "note": "PPO 第730次訓練"
+    "score": 164,
+    "iteration": 2361,
+    "note": "PPO 第2,361次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 489,
-    "note": "(第489次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2412,
+    "note": "PPO 第2,412次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 703,
-    "note": "(第703次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2418,
+    "note": "PPO 第2,418次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 720,
-    "note": "(第720次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2693,
+    "note": "PPO 第2,693次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 779,
-    "note": "(第779次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2713,
+    "note": "PPO 第2,713次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 792,
-    "note": "(第792次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 2826,
+    "note": "PPO 第2,826次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 816,
-    "note": "(第816次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3082,
+    "note": "PPO 第3,082次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 895,
-    "note": "(第895次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3162,
+    "note": "PPO 第3,162次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 902,
-    "note": "(第902次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3244,
+    "note": "PPO 第3,244次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1008,
-    "note": "(第1,008次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3253,
+    "note": "PPO 第3,253次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1108,
-    "note": "(第1,108次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3276,
+    "note": "PPO 第3,276次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1172,
-    "note": "(第1,172次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3278,
+    "note": "PPO 第3,278次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1198,
-    "note": "(第1,198次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3279,
+    "note": "PPO 第3,279次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1217,
-    "note": "(第1,217次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3284,
+    "note": "PPO 第3,284次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1226,
-    "note": "(第1,226次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3285,
+    "note": "PPO 第3,285次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
-    "iteration": 1256,
-    "note": "(第1,256次訓練)"
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3287,
+    "note": "PPO 第3,287次訓練"
   },
   {
-    "name": "AI",
-    "score": 5,
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3295,
+    "note": "PPO 第3,295次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3295,
+    "note": "PPO 第3,295次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3296,
+    "note": "PPO 第3,296次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3347,
+    "note": "PPO 第3,347次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3350,
+    "note": "PPO 第3,350次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3357,
+    "note": "PPO 第3,357次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3388,
+    "note": "PPO 第3,388次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3398,
+    "note": "PPO 第3,398次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3399,
+    "note": "PPO 第3,399次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3501,
+    "note": "PPO 第3,501次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3505,
+    "note": "PPO 第3,505次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3506,
+    "note": "PPO 第3,506次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3905,
+    "note": "PPO 第3,905次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3965,
+    "note": "PPO 第3,965次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3976,
+    "note": "PPO 第3,976次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3977,
+    "note": "PPO 第3,977次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 3994,
+    "note": "PPO 第3,994次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4109,
+    "note": "PPO 第4,109次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4125,
+    "note": "PPO 第4,125次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4153,
+    "note": "PPO 第4,153次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4189,
+    "note": "PPO 第4,189次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4190,
+    "note": "PPO 第4,190次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4190,
+    "note": "PPO 第4,190次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
     "iteration": 4193,
-    "note": "(第4,193次訓練)"
+    "note": "PPO 第4,193次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4194,
+    "note": "PPO 第4,194次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4196,
+    "note": "PPO 第4,196次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4196,
+    "note": "PPO 第4,196次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4198,
+    "note": "PPO 第4,198次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4201,
+    "note": "PPO 第4,201次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4224,
+    "note": "PPO 第4,224次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4234,
+    "note": "PPO 第4,234次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4241,
+    "note": "PPO 第4,241次訓練"
+  },
+  {
+    "name": "AI-PPO",
+    "score": 164,
+    "iteration": 4243,
+    "note": "PPO 第4,243次訓練"
   }
 ]

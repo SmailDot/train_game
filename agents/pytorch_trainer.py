@@ -91,6 +91,8 @@ try:
 
             # 性能追蹤（用於自適應調度）
             self.best_reward = float("-inf")
+            self.best_max_reward = float("-inf")  # 追蹤最高單回合分數
+            self.best_min_reward = float("-inf")  # 追蹤最好的最低分（下限提升）
             self.patience_counter = 0
             self.lr_history = [self.initial_lr]
 
@@ -148,8 +150,21 @@ try:
                 self.lr_scheduler = None
                 print("   不使用學習率調度")
 
-        def _update_lr_adaptive(self, mean_reward, iteration):
-            """自定義自適應學習率更新邏輯"""
+        def _update_lr_adaptive(self, mean_reward, max_reward, min_reward, iteration):
+            """自定義自適應學習率更新邏輯（三指標系統）
+
+            Args:
+                mean_reward: 平均獎勵（評估整體穩定性）
+                max_reward: 最高單回合獎勵（評估潛力上限）
+                min_reward: 最低單回合獎勵（評估穩定性下限）
+                iteration: 當前迭代數
+
+            策略：
+                - 平均分提升 → 整體進步，重置 patience
+                - 最高分突破 → 發現潛力，減少 patience（鼓勵探索）
+                - 最低分提升 → 下限改善，減少 patience（穩定性提升）
+                - 最低分惡化 → 增加 patience（警告：策略不穩定）
+            """
             if self.scheduler_config.get("type") != "adaptive":
                 return
 
@@ -163,12 +178,53 @@ try:
                 "improvement_threshold", 0.01
             )
 
-            # 檢查是否有顯著改善
-            if mean_reward > self.best_reward * (1 + improvement_threshold):
+            # 檢查三個指標的改善情況
+            mean_improved = mean_reward > self.best_reward * (1 + improvement_threshold)
+            max_improved = (
+                max_reward is not None
+                and max_reward > self.best_max_reward * (1 + improvement_threshold / 2)
+            )
+
+            # 最低分改善：使用更寬鬆的閾值（0.5%），因為負分提升很困難
+            min_improved = (
+                min_reward is not None
+                and min_reward > self.best_min_reward * (1 + improvement_threshold / 2)
+            )
+
+            # 最低分惡化檢測：如果最低分下降超過5%，說明策略變不穩定
+            min_degraded = (
+                min_reward is not None
+                and self.best_min_reward > float("-inf")
+                and min_reward < self.best_min_reward * (1 - improvement_threshold * 5)
+            )
+
+            # 更新最佳記錄
+            if mean_improved:
                 self.best_reward = mean_reward
                 self.patience_counter = 0
-                print(f"   📈 新最佳獎勵: {mean_reward:.2f}")
-            else:
+                print(f"   📈 新最佳平均獎勵: {mean_reward:.2f}")
+
+            if max_improved:
+                self.best_max_reward = max_reward
+                self.patience_counter = max(0, self.patience_counter - 5)
+                print(f"   🌟 新最高單回合分數: {max_reward:.2f}（減少5次patience）")
+
+            if min_improved:
+                self.best_min_reward = min_reward
+                self.patience_counter = max(0, self.patience_counter - 3)
+                print(
+                    f"   ⬆️ 最低分提升: {min_reward:.2f}（減少3次patience，穩定性改善）"
+                )
+
+            # 警告：最低分惡化
+            if min_degraded:
+                self.patience_counter += 2  # 增加2次patience，更快觸發LR降低
+                print(
+                    f"   ⚠️ 最低分惡化: {min_reward:.2f}（增加2次patience，策略不穩定）"
+                )
+
+            # 如果沒有任何改善
+            if not mean_improved and not max_improved and not min_improved:
                 self.patience_counter += 1
 
             # 如果停滯太久，降低學習率
@@ -183,6 +239,11 @@ try:
                     self.lr_history.append(new_lr)
                     print(f"\n📉 學習率自適應調整: {current_lr:.6f} → {new_lr:.6f}")
                     print(f"   原因: {patience} 次迭代無顯著改善")
+                    print(
+                        f"   📊 當前最佳 - 平均: {self.best_reward:.2f} "
+                        f"| 最高: {self.best_max_reward:.2f} "
+                        f"| 最低: {self.best_min_reward:.2f}"
+                    )
                     self.patience_counter = 0
                 else:
                     print(f"\n⚠️ 學習率已達最小值 {min_lr:.6f}，無法再降低")
@@ -631,7 +692,15 @@ try:
                 self.writer.add_scalar("policy/entropy", ent, it)
 
                 mean_reward = float(np.mean(ep_rewards)) if ep_rewards else None
+                max_reward = float(np.max(ep_rewards)) if ep_rewards else None
+                min_reward = float(np.min(ep_rewards)) if ep_rewards else None
                 episode_count = len(ep_rewards)
+
+                # 記錄獎勵統計到 TensorBoard
+                if mean_reward is not None:
+                    self.writer.add_scalar("reward/mean", mean_reward, it)
+                    self.writer.add_scalar("reward/max", max_reward, it)
+                    self.writer.add_scalar("reward/min", min_reward, it)
 
                 # 儲存歷史數據用於比較
                 if not hasattr(self, "_history"):
@@ -641,6 +710,8 @@ try:
                         "value_loss": [],
                         "entropy": [],
                         "mean_reward": [],
+                        "max_reward": [],
+                        "min_reward": [],
                         "weight_mean": [],
                         "weight_std": [],
                         "grad_norm": [],
@@ -652,6 +723,8 @@ try:
                 self._history["entropy"].append(ent)
                 if mean_reward is not None:
                     self._history["mean_reward"].append(mean_reward)
+                    self._history["max_reward"].append(max_reward)
+                    self._history["min_reward"].append(min_reward)
 
                 # 打印詳細的訓練診斷信息（每10次迭代）
                 if it % 10 == 0:
@@ -666,6 +739,8 @@ try:
                     print("\n🎮 訓練效果:")
                     if mean_reward is not None:
                         print(f"  平均獎勵: {mean_reward:.2f}")
+                        print(f"  最高獎勵: {max_reward:.2f}")
+                        print(f"  最低獎勵: {min_reward:.2f}")
                     else:
                         print("  平均獎勵: N/A (尚未完成任何回合)")
                     print(f"  完成回合數: {episode_count}")
@@ -796,7 +871,7 @@ try:
 
                 # 自定義自適應學習率調整
                 if it % 10 == 0:  # 每10次迭代檢查一次
-                    self._update_lr_adaptive(mean_reward, it)
+                    self._update_lr_adaptive(mean_reward, max_reward, min_reward, it)
 
                     # 顯示當前學習率
                     current_lr = self.opt.param_groups[0]["lr"]

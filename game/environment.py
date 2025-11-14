@@ -20,9 +20,11 @@ class GameEnv:
     # horizontal scroll speed (pixels per step) base value
     ScrollSpeed = 3.0  # 增加滾動速度
     # how much to increase scroll per passed obstacle (fraction per pass)
-    ScrollIncreasePerPass = 0.02
+    ScrollIncreasePerPass = 0.01  # 降低速度增長率：從 0.02 改為 0.01，避免過快
     # spacing between obstacles (minimum distance)
     ObstacleSpacing = 250.0
+    # 勝利條件：達到此分數即通關
+    WinningScore = 99999
 
     def __init__(self, seed=None, max_steps=1000):
         self.rng = random.Random(seed)
@@ -190,6 +192,17 @@ class GameEnv:
 
         # accumulate episode score
         self.episode_score += float(reward)
+
+        # 檢查勝利條件：達到 99999 分即通關
+        if self.episode_score >= self.WinningScore:
+            reward += 1000.0  # 給予巨大獎勵
+            done = True
+            info = {
+                "episode_score": float(self.episode_score),
+                "win": True,  # 標記為勝利
+            }
+            self.episode_score = 0.0
+            return self._get_state(), float(reward), bool(done), info
 
         self.t += 1
         if self.max_steps is not None and self.t >= self.max_steps:

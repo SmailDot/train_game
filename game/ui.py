@@ -2076,14 +2076,18 @@ class GameUI:
                 if not done:
                     continue
 
+                # 檢查是否勝利（達到 99999 分）
+                is_win = info.get("win", False)
+
                 if self.mode == "Human":
                     self.game_over = True
+                    entry_note = "🎉 通關！" if is_win else None
                     self.leaderboard.append(
                         {
                             "name": "人類",
                             "score": int(self.current_score),
                             "iteration": None,
-                            "note": None,
+                            "note": entry_note,
                         }
                     )
                     self.leaderboard = sorted(
@@ -2099,7 +2103,14 @@ class GameUI:
                     name = f"AI-{algo_name}"
                     score = int(self.current_score)
                     iteration_idx = int(self.training_iterations)
-                    note_text = f"{algo_name} 第{iteration_idx:,}次訓練"
+
+                    # 檢查是否勝利
+                    is_win = info.get("win", False)
+                    if is_win:
+                        note_text = f"🎉 通關！{algo_name} 第{iteration_idx:,}次訓練"
+                    else:
+                        note_text = f"{algo_name} 第{iteration_idx:,}次訓練"
+
                     self.leaderboard.append(
                         {
                             "name": name,
@@ -2116,8 +2127,10 @@ class GameUI:
                     except Exception:
                         pass
 
+                    win_text = " 🎉 通關！" if is_win else ""
                     print(
-                        f"AI 回合 {self.viewer_round + 1} 結束，分數: {score} "
+                        f"AI 回合 {self.viewer_round + 1} 結束，"
+                        f"分數: {score}{win_text} "
                         f"(第{iteration_idx:,}次訓練)"
                     )
 
