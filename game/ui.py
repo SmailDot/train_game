@@ -1903,12 +1903,18 @@ class GameUI:
         """遊戲回合結束時，檢查是否打破記錄並立即更新 checkpoint_best.pt"""
         import shutil
 
-        # 讀取歷史最高分
+        # 讀取歷史最高分（排除當前這局，因為它可能已經被加入 leaderboard）
         historical_best = 0
         if self.leaderboard:
-            historical_best = max(entry.get("score", 0) for entry in self.leaderboard)
+            # 找出除了當前這局之外的最高分
+            for entry in self.leaderboard:
+                score = entry.get("score", 0)
+                iter_num = entry.get("iteration", 0)
+                # 排除當前這局（相同的 iteration）
+                if iter_num != iteration_idx and score > historical_best:
+                    historical_best = score
 
-        # 如果打破記錄
+        # 如果打破歷史記錄
         if current_score > historical_best:
             # 找到最近的檢查點（訓練迭代是10的倍數）
             nearest_checkpoint_iter = (iteration_idx // 10) * 10
