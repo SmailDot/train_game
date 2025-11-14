@@ -12,6 +12,7 @@ from agents.ppo_agent import PPOAgent
 from agents.pytorch_trainer import PPOTrainer
 from game.ai_manager import AlgorithmDescriptor, AlgorithmManager, AlgorithmState
 from game.environment import GameEnv
+from game.training_dialog import TrainingDialog
 
 try:  # Optional advanced trainers
     from agents.q_learning_trainer import QLearningTrainer
@@ -144,6 +145,10 @@ class GameUI:
         # 訓練視覺化視窗（暫不啟動第二個視窗，以免阻塞主畫面）
         self.starting_ai = False
         self._ai_init_thread = None
+
+        # 訓練對話框
+        self.training_dialog = None
+        self.show_training_dialog = False
 
         # leaderboard entries include training iteration metadata for AI scores
         self.leaderboard = [
@@ -612,13 +617,14 @@ class GameUI:
         # map env coords to pixels
         # state[0] is normalized y (0..1), map to play_area height
         s_y = state[0]  # normalized y [0,1]
-        y_px = int(s_y * self.env.ScreenHeight)  # map back to env's coordinate system
-        # clamp to visible range
-        y_px = max(10, min(y_px, self.env.ScreenHeight - 10))
+        # 使用 play_area 的實際高度而不是 env.ScreenHeight
+        y_px = int(s_y * self.play_area.height)
+        # clamp to visible range within play_area
+        y_px = max(10, min(y_px, self.play_area.height - 10))
 
-        # ball: fixed x position at 20% of play area width
-        ball_x = int(self.play_area.width * 0.2)
-        ball_y = y_px
+        # ball: fixed x position at 20% of play area width (相對於 play_area)
+        ball_x = self.play_area.left + int(self.play_area.width * 0.2)
+        ball_y = self.play_area.top + y_px
 
         # Draw all obstacles (scrolling from right to left)
         obstacle_width = 40
@@ -626,20 +632,35 @@ class GameUI:
             for ob_x, gap_top, gap_bottom in self.env.get_all_obstacles():
                 # Map env x coordinates onto pixels.
                 # env: x=0 sits at the player while x=MaxDist is the far right edge.
-                # screen_x = ball_x + (ob_x / MaxDist) * (play_area.width - ball_x)
-                scale = (self.play_area.width - ball_x) / self.env.MaxDist
-                ob_x_px = int(ball_x + ob_x * scale)
+                # 計算相對於 play_area 左邊界的 x 位置
+                ball_x_relative = int(self.play_area.width * 0.2)
+                scale = (self.play_area.width - ball_x_relative) / self.env.MaxDist
+                ob_x_px = self.play_area.left + int(ball_x_relative + ob_x * scale)
 
                 # Only draw obstacles that are visible on screen
-                if -obstacle_width < ob_x_px < self.play_area.width:
-                    gap_top_px = int(gap_top)
-                    gap_bottom_px = int(gap_bottom)
+                if (
+                    self.play_area.left - obstacle_width
+                    < ob_x_px
+                    < self.play_area.right
+                ):
+                    # 將 gap 座標映射到 play_area 的實際高度
+                    gap_top_px = self.play_area.top + int(
+                        gap_top * self.play_area.height / self.env.ScreenHeight
+                    )
+                    gap_bottom_px = self.play_area.top + int(
+                        gap_bottom * self.play_area.height / self.env.ScreenHeight
+                    )
 
                     # draw top pillar and bottom pillar with gap in between
                     pygame.draw.rect(
                         self.screen,
                         (10, 120, 10),
-                        (ob_x_px, 0, obstacle_width, gap_top_px),
+                        (
+                            ob_x_px,
+                            self.play_area.top,
+                            obstacle_width,
+                            gap_top_px - self.play_area.top,
+                        ),
                     )
                     pygame.draw.rect(
                         self.screen,
@@ -648,7 +669,7 @@ class GameUI:
                             ob_x_px,
                             gap_bottom_px,
                             obstacle_width,
-                            self.env.ScreenHeight - gap_bottom_px,
+                            self.play_area.bottom - gap_bottom_px,
                         ),
                     )
 
@@ -1173,6 +1194,39 @@ class GameUI:
 
         return btn_resume, btn_menu
 
+    def _start_training_with_config(self, config: dict):
+        """根據對話框配置啟動訓練"""
+        algorithm = config["algorithm"].lower()
+        checkpoint = config.get("checkpoint")
+
+        # 設置活躍算法
+        self._set_active_algorithm(algorithm)
+
+        # 如果有 checkpoint，載入它
+        if checkpoint:
+            print(f"從 checkpoint 載入：{checkpoint}")
+            # TODO: 實現 checkpoint 載入邏輯
+            # 需要在 trainer 中添加 load_checkpoint 方法
+
+        # 啟動訓練
+        self.selected_mode = "AI"
+        self.mode = "AI"
+        self.running = True
+        self.current_score = 0.0
+        self.game_over = False
+        self.paused = False
+        self.viewer_round = 0
+
+        # 重置 AI 顯示資訊
+        self.last_ai_action = None
+        self.last_ai_action_prob = 0.0
+        self.last_ai_value = 0.0
+        self.agent_ready = False
+        self.ai_status = "initializing"
+
+        print(f"啟動 {algorithm.upper()} 訓練模式（背景初始化）...")
+        self._start_ai_training_async(force_reset=False)
+
     def _start_ai_training_async(self, force_reset: bool = False):
         """在背景線程初始化並啟動 AI 訓練，避免卡住主畫面。"""
         if self.starting_ai:
@@ -1227,6 +1281,20 @@ class GameUI:
             traceback.print_exc()
 
     def handle_click(self, pos):
+        # Handle training dialog clicks
+        if self.show_training_dialog and self.training_dialog is not None:
+            result = self.training_dialog.handle_click(pos)
+            if result is not None:
+                self.show_training_dialog = False
+                if result["action"] == "start":
+                    # 開始訓練
+                    self._start_training_with_config(result)
+                    return self.env.reset()
+                elif result["action"] == "cancel":
+                    # 取消
+                    self.training_dialog = None
+            return None
+
         # Handle game over dialog clicks
         if self.game_over:
             btn_continue, btn_menu = self.draw_game_over_dialog()  # Get button rects
@@ -1304,26 +1372,10 @@ class GameUI:
             # Reset environment and return the new state
             return self.env.reset()
         if not self.running and self.btn_ai.collidepoint(pos):
-            self.selected_mode = "AI"
-            self.mode = "AI"
-            self.running = True
-            self.current_score = 0.0
-            self.game_over = False
-            self.paused = False
-            self.viewer_round = 0
-
-            # 重置 AI 顯示資訊
-            self.last_ai_action = None
-            self.last_ai_action_prob = 0.0
-            self.last_ai_value = 0.0
-            self.agent_ready = False
-            self.ai_status = "initializing"
-
-            print("啟動 AI 訓練模式（背景初始化）...")
-            self._start_ai_training_async(force_reset=False)
-
-            # Reset environment and return the new state
-            return self.env.reset()
+            # 顯示訓練配置對話框
+            self.training_dialog = TrainingDialog(self.width, self.height)
+            self.show_training_dialog = True
+            return None
         if self.btn_board.collidepoint(pos):
             if self.mode == "Board":
                 self.mode = "Menu"
@@ -1790,6 +1842,9 @@ class GameUI:
                 self._draw_algorithm_panel()  # 繪製左側演算法面板
                 self.draw_playfield(s)
                 self.draw_panel()
+                # 繪製訓練對話框（如果顯示）
+                if self.show_training_dialog and self.training_dialog is not None:
+                    self.training_dialog.draw(self.screen)
                 pygame.display.flip()
                 self.clock.tick(self.FPS)
                 continue
