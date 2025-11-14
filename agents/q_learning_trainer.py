@@ -127,6 +127,12 @@ class QLearningTrainer:
         )
         return path
 
+    def build_agent(self) -> QLearningAgent:
+        """Return an agent suitable for UI inference (shares trainer networks)."""
+        # The trainer already instantiates self.agent in __init__, return it so
+        # the UI can call act() against the trainer's live network weights.
+        return self.agent
+
     def train(
         self,
         total_timesteps=50000,

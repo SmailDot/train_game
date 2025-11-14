@@ -134,6 +134,10 @@ class SACTrainer:
         )
         return path
 
+    def build_agent(self) -> SACAgent:
+        """Return the trainer's agent for UI inference (shares networks)."""
+        return self.agent
+
     def train(
         self,
         total_timesteps=50000,

@@ -112,6 +112,11 @@ class DQNTrainer:
         )
         return path
 
+    def build_agent(self) -> DQNAgent:
+        """Return an agent for UI use that shares the trainer's policy network."""
+        # trainer already created self.agent in __init__
+        return self.agent
+
     def train(
         self,
         total_timesteps=50000,

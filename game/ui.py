@@ -723,12 +723,21 @@ class GameUI:
         spacing = 10
         self.algorithm_rects = {}
 
-        for key in keys:
+        num = len(keys)
+        cols = 2 if num > 2 else 1
+        col_spacing = 12
+        col_width = (width - (cols - 1) * col_spacing) // cols
+
+        for idx, key in enumerate(keys):
             desc = self.ai_manager.descriptor(key)
             slot = self.ai_manager.state(key)
             if slot is None:
                 continue
-            rect = pygame.Rect(x, y, width, entry_height)
+            col = idx % cols
+            row = idx // cols
+            rect_x = x + col * (col_width + col_spacing)
+            rect_y = y + row * (entry_height + spacing)
+            rect = pygame.Rect(rect_x, rect_y, col_width, entry_height)
             active = key == self.ai_manager.active_key
             running = slot.trainer_thread is not None and slot.trainer_thread.is_alive()
             base_color = desc.color
@@ -787,9 +796,10 @@ class GameUI:
                 "toggle": toggle_rect,
             }
 
-            y += entry_height + spacing
-
-        return y
+        # compute bottom y of the tiled area
+        rows = (num + cols - 1) // cols
+        bottom = y + rows * (entry_height + spacing)
+        return bottom
 
     def draw_panel(self):
         """繪製簡化的側邊面板（只顯示基本信息）"""
@@ -898,6 +908,15 @@ class GameUI:
                 f"狀態: {status_text}", True, status_color
             )
             self.screen.blit(status_surface, (self.panel.left + 20, ai_info_y + 30))
+
+            # 顯示目前選中的演算法名稱
+            slot = self._active_slot()
+            if slot is not None:
+                algo_label = self.font.render(
+                    f"演算法: {slot.descriptor.name}", True, (200, 200, 230)
+                )
+                self.screen.blit(algo_label, (self.panel.left + 20, ai_info_y + 52))
+                # info_y_cursor initialized below; don't increment before it's defined
 
             line_height = 32  # 增加行高以避免重疊
             info_y_cursor = ai_info_y + 65
