@@ -24,7 +24,7 @@ class GameEnv:
     # spacing between obstacles (minimum distance)
     ObstacleSpacing = 250.0
     # 勝利條件：達到此分數即通關
-    WinningScore = 99999
+    WinningScore = 6666
 
     def __init__(self, seed=None, max_steps=None):
         self.rng = random.Random(seed)

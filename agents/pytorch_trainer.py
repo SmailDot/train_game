@@ -248,6 +248,152 @@ try:
                 else:
                     print(f"\n⚠️ 學習率已達最小值 {min_lr:.6f}，無法再降低")
 
+        def _check_performance_degradation(
+            self, mean_reward, max_reward, min_reward, iteration
+        ):
+            """檢測性能嚴重退化並回檔到最佳檢查點"""
+            # 只有在有足夠訓練歷史時才檢查（至少 100 次迭代）
+            if iteration < 100:
+                return False
+
+            # 只有在所有獎勵都有效時才檢查
+            if (
+                mean_reward is None
+                or max_reward is None
+                or min_reward is None
+                or self.best_reward <= 0
+            ):
+                return False
+
+            # 計算各指標的下降比例
+            mean_drop = (self.best_reward - mean_reward) / abs(self.best_reward)
+            max_drop = (
+                (self.best_max_reward - max_reward) / abs(self.best_max_reward)
+                if self.best_max_reward > 0
+                else 0
+            )
+            min_drop = (
+                (self.best_min_reward - min_reward) / abs(self.best_min_reward)
+                if self.best_min_reward > 0
+                else 0
+            )
+
+            # 嚴格的退化閾值：任一指標下降超過 40% 即視為崩潰
+            degradation_threshold = 0.40
+
+            # 檢測崩潰條件（任一指標嚴重下降）
+            is_catastrophic = (
+                mean_drop > degradation_threshold
+                or max_drop > degradation_threshold
+                or (
+                    min_drop > degradation_threshold and self.best_min_reward > 10
+                )  # 最低分只有在原本較高時才關注
+            )
+
+            if is_catastrophic:
+                print(f"\n{'='*60}")
+                print("⚠️⚠️⚠️ 檢測到性能崩潰！⚠️⚠️⚠️")
+                print(f"{'='*60}")
+                print("📉 當前指標 vs 最佳記錄：")
+                print(
+                    f"   平均分: {mean_reward:.2f} (最佳: {self.best_reward:.2f}) "
+                    f"↓ {mean_drop*100:.1f}%"
+                )
+                print(
+                    f"   最高分: {max_reward:.2f} (最佳: {self.best_max_reward:.2f}) "
+                    f"↓ {max_drop*100:.1f}%"
+                )
+                print(
+                    f"   最低分: {min_reward:.2f} (最佳: {self.best_min_reward:.2f}) "
+                    f"↓ {min_drop*100:.1f}%"
+                )
+                print("\n🔄 正在回檔到最佳檢查點...")
+
+                # 執行回檔
+                success = self._rollback_to_best_checkpoint()
+
+                if success:
+                    print("✅ 成功回檔！繼續訓練...")
+                    print(f"{'='*60}\n")
+                    return True
+                else:
+                    print("❌ 回檔失敗，繼續當前訓練...")
+                    print(f"{'='*60}\n")
+                    return False
+
+            return False
+
+        def _rollback_to_best_checkpoint(self):
+            """回檔到最佳檢查點"""
+            try:
+                # 尋找最佳檢查點（基於迭代次數）
+                checkpoints = []
+                for file in os.listdir(self.save_dir):
+                    if file.startswith("checkpoint_") and file.endswith(".pt"):
+                        try:
+                            step = int(
+                                file.replace("checkpoint_", "").replace(".pt", "")
+                            )
+                            checkpoints.append((step, file))
+                        except ValueError:
+                            continue
+
+                if not checkpoints:
+                    print("   ⚠️ 找不到可用的檢查點")
+                    return False
+
+                # 按迭代次數排序，取最新的檢查點
+                checkpoints.sort(reverse=True)
+
+                # 嘗試載入最近的幾個檢查點（跳過當前迭代）
+                for step, filename in checkpoints[:5]:  # 嘗試最近 5 個檢查點
+                    checkpoint_path = os.path.join(self.save_dir, filename)
+
+                    try:
+                        print(f"   📂 嘗試載入檢查點: {filename}")
+                        checkpoint = torch.load(
+                            checkpoint_path, map_location=self.device
+                        )
+
+                        # 載入模型狀態
+                        if "model_state" in checkpoint:
+                            self.net.load_state_dict(checkpoint["model_state"])
+                            print("      ✓ 模型參數已載入")
+                        else:
+                            print("      ✗ 檢查點格式錯誤")
+                            continue
+
+                        # 載入優化器狀態（重置學習動量）
+                        if "optimizer_state" in checkpoint:
+                            self.opt.load_state_dict(checkpoint["optimizer_state"])
+                            print("      ✓ 優化器狀態已載入")
+
+                        # 重置 patience 計數器
+                        self.patience_counter = 0
+
+                        # 重置學習率為初始值或略低的值
+                        rollback_lr = self.initial_lr * 0.5  # 使用稍低的學習率
+                        for param_group in self.opt.param_groups:
+                            param_group["lr"] = rollback_lr
+                        print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")
+
+                        print(f"\n   ✅ 成功從迭代 #{step} 回檔！")
+                        return True
+
+                    except Exception as e:
+                        print(f"      ✗ 載入失敗: {e}")
+                        continue
+
+                print("   ❌ 所有檢查點都無法載入")
+                return False
+
+            except Exception as e:
+                print(f"   ❌ 回檔過程發生錯誤: {e}")
+                import traceback
+
+                traceback.print_exc()
+                return False
+
         def _load_dynamic_config(self, iteration):
             """每10個迭代檢查並加載配置文件更新"""
             if iteration % 10 != 0:
@@ -701,6 +847,12 @@ try:
                     self.writer.add_scalar("reward/mean", mean_reward, it)
                     self.writer.add_scalar("reward/max", max_reward, it)
                     self.writer.add_scalar("reward/min", min_reward, it)
+
+                    # 檢測性能退化（每10次迭代才檢查，避免過度敏感）
+                    if it % 10 == 0:
+                        self._check_performance_degradation(
+                            mean_reward, max_reward, min_reward, it
+                        )
 
                 # 儲存歷史數據用於比較
                 if not hasattr(self, "_history"):
