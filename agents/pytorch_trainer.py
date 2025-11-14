@@ -31,7 +31,7 @@ try:
             lam=0.95,
             clip_eps=0.2,
             vf_coef=0.5,
-            ent_coef=0.01,
+            ent_coef=0.05,
             batch_size=64,
             ppo_epochs=4,
             device=None,

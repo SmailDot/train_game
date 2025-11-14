@@ -91,6 +91,7 @@ class GameUI:
 
         self._vector_env_options = [4, 8, 12, 16]
         self._vector_env_index = 0
+        self.vector_envs = self._vector_env_options[self._vector_env_index]
 
         # current episode score
         self.current_score = 0.0
@@ -159,7 +160,6 @@ class GameUI:
         self.trainer_thread = None
         self._trainer_stop_event = None
         self.trainer = None
-        self.vector_envs = 4
         self.checkpoint_wait_seconds = 2.0
 
     def _update_layout(self, width: int, height: int) -> None:
@@ -465,39 +465,39 @@ class GameUI:
             )
             self.screen.blit(status_surface, (self.panel.left + 20, ai_info_y + 30))
 
-            line_height = 30
-            info_y_cursor = ai_info_y + 60
+            line_height = 32  # 增加行高以避免重疊
+            info_y_cursor = ai_info_y + 65
             with self._lock:
                 metrics_snapshot = dict(self.latest_metrics)
 
-            metrics_lines = []
-            if self.training_iterations > 0:
-                metrics_lines.append(
-                    ("PPO 更新次數", f"{self.training_iterations:,}", (210, 220, 255))
-                )
-            if self.ai_round > 0:
-                metrics_lines.append(
-                    ("累積訓練回合", f"{self.ai_round:,}", (200, 255, 200))
-                )
-            timesteps = metrics_snapshot.get("timesteps")
-            if isinstance(timesteps, (int, float)) and timesteps:
-                metrics_lines.append(
-                    ("蒐集步數", f"{int(timesteps):,}", (255, 210, 170))
-                )
-            mean_reward = metrics_snapshot.get("mean_reward")
-            if isinstance(mean_reward, (int, float)):
-                metrics_lines.append(
-                    ("最近平均回報", f"{mean_reward:.2f}", (255, 240, 180))
-                )
-            metrics_lines.append(
-                ("觀戰速度", f"x{self.ai_speed_multiplier}", (190, 210, 255))
-            )
-            metrics_lines.append(("並行環境", f"{self.vector_envs}", (190, 210, 255)))
+            metrics_spec = [
+                ("PPO 更新次數", "it", "{:,.0f}", (210, 220, 255), ""),
+                ("累積訓練回合", "episode_count", "{:,.0f}", (200, 255, 200), ""),
+                ("最近平均回報", "mean_reward", "{:.2f}", (255, 240, 180), ""),
+                (
+                    "Policy Loss",
+                    "policy_loss",
+                    "{:.4f}",
+                    (200, 80, 80),
+                    " (越低越好)",
+                ),
+                ("Value Loss", "value_loss", "{:.4f}", (80, 200, 120), " (越低越好)"),
+                (
+                    "Entropy",
+                    "entropy",
+                    "{:.4f}",
+                    (120, 120, 200),
+                    " (初期高後期低)",
+                ),
+            ]
 
-            for label, value, color in metrics_lines[:6]:
-                text = self.font.render(f"{label}: {value}", True, color)
-                self.screen.blit(text, (self.panel.left + 20, info_y_cursor))
-                info_y_cursor += line_height
+            for label, key, fmt, color, note in metrics_spec:
+                value = metrics_snapshot.get(key)
+                if isinstance(value, (int, float)):
+                    text_str = f"{label}: {fmt.format(value)}{note}"
+                    text = self.font.render(text_str, True, color)
+                    self.screen.blit(text, (self.panel.left + 20, info_y_cursor))
+                    info_y_cursor += line_height
 
             if not self.agent_ready:
                 waiting = self.font.render(
@@ -1057,7 +1057,7 @@ class GameUI:
 
         if max_len < 2:
             # draw a hint text
-            hint = self.font.render("No loss data yet", True, (150, 150, 150))
+            hint = self.font.render("等待 Loss 數據中...", True, (150, 150, 150))
             surf.blit(hint, (6, 6))
             self.screen.blit(surf, (x, y))
             return
@@ -1070,13 +1070,20 @@ class GameUI:
             "total": (220, 220, 80),
         }
 
+        # 繪製圖例
+        legend_y = 5
+        for name, color in series_colors.items():
+            label = self.font.render(name.capitalize(), True, color)
+            surf.blit(label, (w - label.get_width() - 5, legend_y))
+            legend_y += 20
+
         for name, color in series_colors.items():
             seq = list(lh_copy.get(name, []))
             if not seq:
                 continue
             seq = seq[-N:]
-            mx = max(seq)
-            mn = min(seq)
+            mx = max(seq) if seq else 0
+            mn = min(seq) if seq else 0
             denom = mx - mn if mx != mn else 1.0
             points = []
             for i, val in enumerate(seq):
