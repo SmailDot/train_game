@@ -131,6 +131,7 @@ class GameUI:
         self.btn_init = pygame.Rect(0, 0, 0, 0)
         self.btn_speed = pygame.Rect(0, 0, 0, 0)
         self.btn_parallel = pygame.Rect(0, 0, 0, 0)
+        self.btn_multi_view = pygame.Rect(0, 0, 0, 0)  # 多視窗觀看按鈕
         self._btn_save_template = pygame.Rect(0, 0, 0, 0)
         self.btn_save = None
         self._update_layout(self.width, self.height)
@@ -535,6 +536,8 @@ class GameUI:
         top += btn_height + spacing
         self.btn_board = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
+        self.btn_multi_view = pygame.Rect(left, top, btn_width, btn_height)
+        top += btn_height + spacing
         self.btn_init = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
         self.btn_speed = pygame.Rect(left, top, btn_width, btn_height)
@@ -837,6 +840,7 @@ class GameUI:
             (self.btn_human, "人類遊玩", self.large_font, (70, 70, 80)),
             (self.btn_ai, "AI 訓練", self.large_font, (70, 70, 80)),
             (self.btn_board, "排行榜", self.large_font, (70, 70, 80)),
+            (self.btn_multi_view, "多視窗觀看", self.font, (80, 70, 120)),
             (self.btn_init, "初始化訓練", self.font, (70, 70, 80)),
             (
                 self.btn_speed,
@@ -1195,6 +1199,31 @@ class GameUI:
         self._ai_init_thread = threading.Thread(target=_worker, daemon=True)
         self._ai_init_thread.start()
 
+    def _launch_multi_window_view(self):
+        """啟動多視窗觀看模式"""
+        import subprocess
+        import sys
+
+        print("🚀 正在啟動多視窗觀看模式...")
+        print("將開啟 5 個訓練視窗（PPO, SAC, DQN, Double DQN, TD3）")
+
+        try:
+            # 使用 subprocess 在背景執行 run_multi_train.py
+            script_path = "run_multi_train.py"
+            subprocess.Popen(
+                [sys.executable, script_path],
+                creationflags=(
+                    subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+                ),
+            )
+            print("✅ 多視窗模式已啟動！")
+            print("提示：關閉所有新視窗以結束多視窗模式")
+        except Exception as e:
+            print(f"❌ 啟動多視窗模式失敗：{e}")
+            import traceback
+
+            traceback.print_exc()
+
     def handle_click(self, pos):
         # Handle game over dialog clicks
         if self.game_over:
@@ -1301,6 +1330,10 @@ class GameUI:
                 self.paused = False
                 self.game_over = False
                 self.mode = "Board"
+            return None
+        if not self.running and self.btn_multi_view.collidepoint(pos):
+            # 啟動多視窗觀看模式
+            self._launch_multi_window_view()
             return None
 
     def _handle_save_training(self):
