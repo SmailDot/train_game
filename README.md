@@ -1,58 +1,59 @@
 ```markdown
-# train_game
+# Train Game
 
-簡易 Flappy-like 遊戲 + RL (PPO) 實驗專案骨架。此 README 專為 Windows (PowerShell) 使用者整理，包含環境建立、測試、以及如何啟動 UI/訓練器的步驟。
+基於 Pygame 的 Flappy-like 遊戲環境，整合 **PPO / SAC / DQN / Double DQN / TD3** 等強化學習演算法，可在單一 UI 中切換訓練，也能透過 `run_multi_train.py` 同步觀看多個演算法的訓練進度。
+```
 
-快速開始（Windows / PowerShell）
+## 專案說明
 
-1) 建立並啟用虛擬環境
+- `game/`：遊戲環境、Pygame UI、訓練視窗 (TrainingWindow)、AlgorithmManager。
+- `agents/`：神經網路、PPO Trainer、SAC、DQN/Double-DQN、TD3、共用 Replay Buffer。
+- `checkpoints/`：訓練紀錄、排行榜、模型快照。
+- `run_game.py`：單視窗 GameUI 入口；`run_multi_train.py`：一次啟動多視窗訓練。
+- `tests/`：pytest 套件，包含環境/碰撞/簡易 UI smoke 測試。
+
+## 核心功能
+
+1. **多演算法管理**：右側演算法面板可單獨啟動/停止 PPO、SAC、DQN、Double DQN、TD3，並即時切換觀察對應的代理人。
+2. **多視窗訓練**：`run_multi_train.py` 會為 `ALGORITHMS_TO_RUN` 內的每個 key 開啟專屬 UI，方便比較學習策略。
+3. **訓練視覺化**：每個演算法皆可連動獨立 TrainingWindow，顯示神經網路拓撲與 policy/value/entropy loss。
+4. **排行榜/分數追蹤**：AI 破紀錄時會以 `AI-演算法名稱` 格式寫入 `checkpoints/scores.json`，玩家/AI 成績可在 UI 右側查看 Top 5。
+5. **背景訓練 + UI 串流**：AlgorithmManager 以背景執行緒訓練指定演算法，並將 metrics 傳回 UI，減少手動整合負擔。
+
+## 環境設定（Windows / PowerShell）
+
+1. 建立並啟用虛擬環境
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-2) 安裝依賴（本專案使用已釘選的版本，請參照 `requirements.txt`）
+2. 安裝依賴（依 `requirements.txt`）
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-注意：如果要使用 PyTorch CUDA 版本，請依照你的 CUDA 版本到 https://pytorch.org/ 取得正確安裝指令；若無 GPU，使用 CPU 版：
+若需 CUDA 版本 PyTorch，請到 <https://pytorch.org/> 取得對應指令；純 CPU 可直接：
 
 ```powershell
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-3) 執行測試（單元/整合/頭less UI smoke）
+3. 執行測試（單元 + 整合 + UI smoke）
 
 ```powershell
 python -m pytest -q
 ```
 
-4) 以 smoke 模式啟動 trainer（範例會印出幾個 episode 的結果）
+4. 選擇性：先跑一個短版 PPO 訓練確認依賴
 
 ```powershell
-python -m agents.trainer
+python -c "from agents.pytorch_trainer import PPOTrainer; t=PPOTrainer(); t.train(total_timesteps=2000)"
 ```
 
-5) 啟動 Pygame UI（若在有顯示器的環境）
-
-```powershell
-python run_game.py
-```
-
-如果你在無頭 (headless) 環境，UI 可能無法啟動，請於本機桌面環境執行。
-
-Git / 提交範例（中文提交訊息）：
-
-```powershell
-git add .
-git commit -m "新增：PPO agent 與 UI 骨架與測試"
-git push
-```
-
-啟用 pre-commit hooks（建議在本地環境執行一次以完成 hooks 安裝）：
+5. 啟動 pre-commit hooks（確保格式一致）
 
 ```powershell
 pip install pre-commit
@@ -60,119 +61,138 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-CI badge（若已啟用 GitHub Actions）：
+## 訓練變數與獎勵
 
-![CI](https://github.com/SmailDot/train_game/actions/workflows/ci.yml/badge.svg)
+- **狀態** $s_t = [y, v_y, x_{obs}, y_{gap\_top}, y_{gap\_bottom}]$（均已正規化）。
+- **動作** $a_t \in \{0,1\}$：0 = 不跳、1 = 跳。
+- **獎勵**：
+   - 通過障礙：$r_{pass} = +5$
+   - 碰撞或飛出上下界：$r_{collision} = -5$
+   - 其他時間步：0（已移除時間懲罰）。
 
-進階：以 PyTorch 訓練器做短跑驗證（CPU 範例）
+## 訓練公式補充
 
-```powershell
-# 建議先安裝 requirements.txt 內的套件
-python -c "from agents.pytorch_trainer import PPOTrainer; t=PPOTrainer(); t.train(total_timesteps=2000)"
-```
+### PPO（含 GAE）
 
-疑難排解小提示
-- 若出現 `pygame` 無法啟動，請確認正在使用有 GUI 的環境並且 `SDL_VIDEODRIVER` 未被設定為 headless。
-- pre-commit 若在安裝 hooks 時發生 rev/checkout 問題，嘗試在能連上外部 Git 的網路環境重新執行 `pre-commit install`。
-
-歡迎在本地執行上述命令，有任何錯誤訊息把輸出貼給我，我可以幫你一步步排查。
-
----
-小節：本專案包含 `game/` (環境與 UI)、`agents/` (網路、PPO trainer)、`tests/` (pytest)、以及 CI + pre-commit configs。
-```
- 
-## 變數、狀態與獎勵（Definitions）
-
-- 狀態 (State) S：5 維向量 $[y, v_y, x_{obs}, y_{gap\_top}, y_{gap\_bottom}]$，其中 $y$、$v_y$、$y_{gap\_top}$、$y_{gap\_bottom}$ 已被歸一化至畫面高度，$x_{obs}$ 為障礙物到玩家的相對距離並以最大距離做正規化。
-- 動作 (Action) A：二元，0 = 不跳、1 = 跳（一次性向上 impulse）。
-- 獎勵 (Reward) R（已實作）：
-	- 每步時間懲罰：$r_{step} = -0.1$
-	- 通過障礙：$r_{pass} = +5.0$（當障礙橫過玩家位置且球處於 gap 範圍內）
-	- 碰撞障礙或超出上下界（掉落或撞上天花板）：$r_{collision} = -5.0$
-
-## PPO 與 GAE 相關公式（摘要）
-
-以下列出訓練中使用的主要公式，方便把 trainer 的行為與 UI 上顯示的數值對應起來。
-
-- 折扣回報（Return）：
+折扣回報：
 $$G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k}$$
 
-- 時間差分與廣義優勢估計（GAE）：
+優勢估計（GAE）：
 \begin{aligned}
 \delta_t &= r_t + \gamma V(s_{t+1}) - V(s_t) \\
-\hat{A}_t &= \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}
+\hat{A}_t &= \sum_{l=0}^{\infty} (\gamma \lambda)^l \, \delta_{t+l}
 \end{aligned}
 
-- PPO 剪裁目標（Clipped surrogate objective）:
+剪裁目標：
 \begin{aligned}
-L^{CLIP}(\theta) = - \mathbb{E}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]
+L^{\text{CLIP}}(\theta) = - \mathbb{E}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \operatorname{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]
 \end{aligned}
 其中 $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$。
 
-- 值函數損失（Value loss）：
-$$L^{VF} = \mathbb{E}_t\left[ (V_\theta(s_t) - R_t)^2 \right]$$
+值函數與熵項：
+\begin{aligned}
+L^{VF} &= \mathbb{E}_t[(V_\theta(s_t)-G_t)^2] \\
+S[\pi_\theta] &= - \sum_a \pi_\theta(a|s_t)\log\pi_\theta(a|s_t)
+\end{aligned}
 
-- 熵項（鼓勵探索）：
-$$S[\pi_\theta](s_t) = - \sum_a \pi_\theta(a|s_t) \log \pi_\theta(a|s_t)$$
+總損失：
+$$L = L^{\text{CLIP}} + c_{vf}L^{VF} - c_{ent} S[\pi_\theta]$$
 
-- 總損失（訓練器內使用，權重可調）：
-$$L = L^{CLIP} + c_{vf} L^{VF} - c_{ent} S[\pi]\; .$$
+### DQN / Double DQN（QLearningTrainer）
 
-## 在 UI 上顯示的項目
+經驗回放樣本的目標值：
+\begin{aligned}
+y_t^{\text{DQN}} &= r_t + \gamma \max_{a'} Q_{\theta^-}(s_{t+1}, a') \\
+y_t^{\text{DDQN}} &= r_t + \gamma Q_{\theta^-}\!\left(s_{t+1}, \arg\max_{a'} Q_{\theta}(s_{t+1}, a')\right)
+\end{aligned}
 
-### 遊戲主界面（Game UI）
-- **遊玩區域**：85% 的寬度用於遊戲顯示，提供寬敞的視野
-- **側邊面板**：簡潔顯示當前模式、本局分數和排行榜 Top 5
-- **三個模式按鈕**：
-  - 人類遊玩：手動控制（空白鍵跳躍）
-  - AI 遊玩：自動啟動 AI 並開啟訓練視覺化視窗
-  - 排行榜：查看歷史最高分
+平方損失：
+$$L(\theta) = \mathbb{E}[(y_t - Q_{\theta}(s_t, a_t))^2]$$
 
-### 訓練視覺化視窗（Training Window）
-當啟動 AI 模式時，會自動彈出獨立的訓練視覺化視窗（800x600），包含：
+### SAC（離散版）
 
-1. **神經網路即時視覺化**：
-   - 顯示真實的網路結構：[5, 64, 64, 2] 層
-   - 每一層都有節點和連接線
-   - 科技感的藍紫漸變色
-   - 層標籤顯示 (n=0, n=1, n=2, n=3)
+Critic 目標：
+\begin{aligned}
+J_Q &= \mathbb{E}\left[(Q_{\phi}(s_t,a_t) - y_t)^2\right] \\
+y_t &= r_t + \gamma \mathbb{E}_{a_{t+1}\sim\pi}\left[\min(Q_{\bar{\phi}}(s_{t+1},a_{t+1})) - \alpha\log\pi(a_{t+1}|s_{t+1})\right]
+\end{aligned}
 
-2. **Loss Function 圖表**：
-   - 多序列即時圖表（Policy Loss, Value Loss, Entropy, Total Loss）
-   - 不同顏色曲線方便區分
-   - 自動縮放和平滑滾動
+Actor 目標：
+$$J_\pi = \mathbb{E}_{s_t\sim D}\left[\mathbb{E}_{a_t\sim\pi}\left[\alpha \log \pi(a_t|s_t) - Q_{\phi}(s_t,a_t)\right]\right]$$
 
-### 獎勵機制更新
-- ✅ **移除時間懲罰**：球往前走不再扣分（從 -0.1 改為 0.0）
-- 通過障礙：$r_{pass} = +5.0$
-- 碰撞障礙或超出上下界：$r_{collision} = -5.0$
+雙網路軟更新：
+$$\bar{\phi} \leftarrow \tau \phi + (1-\tau) \bar{\phi}$$
 
-若要把其他公式或變數加入 README（例如更細的超參數表格或輸出正規化細節），我可以把它補進來。
+### TD3（連續版，供比較）
 
-## 從 Trainer 到 UI 的即時串接（範例）
+- 兩個 Critic 取最小值防止 Q-value 高估。
+- 延遲 Actor 更新與 target policy smoothing：
+\begin{aligned}
+	ilde{a} &= \operatorname{clip}(\pi_{\theta^-}(s_{t+1}) + \epsilon, a_{low}, a_{high}) \\
+y_t &= r_t + \gamma \min_i Q_{\phi_i^-}(s_{t+1}, \tilde{a})
+\end{aligned}
 
-UI 已支援由訓練器在背景執行時直接推送訓練指標到畫面：
+## 功能說明
 
-- UI 方法：`GameUI.update_losses(metrics: dict)` -- 訓練器會以字典形式回報 metrics，常見 keys 包含：
-	- `it` (iteration)、`loss` (total loss)、`policy_loss`、`value_loss`、`entropy`、`timesteps`、`mean_reward`、`episode_count`。
-- UI 方法：`GameUI.start_trainer(trainer, **train_kwargs)` -- 在背景 thread 執行 `trainer.train(...)`，並自動把 `metrics_callback` 綁到 `ui.update_losses`。
+- **演算法控制面板**：顯示狀態（初始化/訓練中/儲存中）、迭代次數、啟停按鈕、快捷鍵 (1~4)。
+- **Loss 視覺化**：側邊欄內嵌小型多序列圖，同步 TrainingWindow 資料。
+- **排行榜**：AI 成績以 `AI-演算法` 命名，並記錄訓練 iteration。
+- **向量化環境**：PPO 可設定並行 env 數（UI 內「並行環境」按鈕輪替）。
+- **速度控制**：觀戰速度可於 UI 快速切換 x1/x2/x4/x8。
 
-範例：在你的啟動腳本或 `run_game.py` 中可以這樣呼叫：
+## 如何使用
 
-```python
-from agents.pytorch_trainer import PPOTrainer
-from game.ui import GameUI
+### 1. 執行單視窗 UI
 
-ui = GameUI()
-trainer = PPOTrainer()
-
-# 啟動 trainer，在背景執行；UI 會即時顯示 loss/entropy/value/total 與最新數值
-ui.start_trainer(trainer, total_timesteps=10000, env=ui.env, log_interval=1)
-
-# 然後啟動 UI loop（主 thread）
-ui.run()
+```powershell
+python run_game.py
 ```
 
-註：`start_trainer` 會在背景執行 `trainer.train(metrics_callback=ui.update_losses, **train_kwargs)`。
-因此也可以直接把 `PPOTrainer.train` 中的 `metrics_callback` 參數指向你自己的回呼函式來做整合（例如紀錄到外部監控系統）。
+- 選擇「人類遊玩」以鍵盤體驗；
+- 選擇「AI 訓練」啟動背景訓練，並使用右側面板切換演算法；
+- 「排行榜」可查看歷史 Top 分數，再次點擊返回主選單。
+
+### 2. 同步觀察多個演算法
+
+```powershell
+python run_multi_train.py
+```
+
+- 修改 `run_multi_train.py` 中的 `ALGORITHMS_TO_RUN` 以調整要開啟的演算法；
+- 每個演算法會在獨立行程中開啟 GameUI，採 `spawn` 啟動方式避免互相干擾。
+
+### 3. 直接調用 Trainer（無 UI）
+
+```powershell
+python -c "from agents.sac_trainer import SACTrainer; SACTrainer().train(total_timesteps=10000)"
+```
+
+或在互動式 notebook / script 中：
+
+```python
+from agents.q_learning_trainer import QLearningTrainer
+
+trainer = QLearningTrainer(mode="double_dqn")
+trainer.train(total_timesteps=5000)
+```
+
+### 4. Git 流程示例
+
+```powershell
+git add .
+git commit -m "新增多演算法訓練器和使用者介面更新"
+git push
+```
+
+## 常見問題
+
+- **Pygame 無法啟動**：請在有 GUI 的環境執行，或確認 `SDL_VIDEODRIVER` 未被設為 `dummy`。
+- **多演算法同時啟動卡住**：建議以 `run_multi_train.py` 分多個行程啟動，或在 UI 內一次只啟動一個演算法。
+- **pre-commit 未通過**：重新執行 `pre-commit run --all-files`，依提示修復 `ruff`/`black`/`isort` 問題。
+
+---
+
+有任何新的需求（例如增加演算法、擴充視覺化、或接入雲端訓練）都可以開 Issue 或直接留言，持續迭代這個教學/展示專案。說明文件若需其他語言版本也歡迎提出！
+
+````
 
