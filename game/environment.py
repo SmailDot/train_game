@@ -26,7 +26,7 @@ class GameEnv:
     # 勝利條件：達到此分數即通關
     WinningScore = 99999
 
-    def __init__(self, seed=None, max_steps=1000):
+    def __init__(self, seed=None, max_steps=None):
         self.rng = random.Random(seed)
         self.obstacles = []  # list of (x, gap_top, gap_bottom, passed) tuples
         # Optional step limit (None for unlimited play)
