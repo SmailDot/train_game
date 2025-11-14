@@ -187,6 +187,7 @@ try:
                 else:
                     print(f"\n⚠️ 學習率已達最小值 {min_lr:.6f}，無法再降低")
 
+        def _load_dynamic_config(self, iteration):
             """每10個迭代檢查並加載配置文件更新"""
             if iteration % 10 != 0:
                 return False
