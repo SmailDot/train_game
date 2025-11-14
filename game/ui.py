@@ -750,9 +750,11 @@ class GameUI:
             active = key == self.ai_manager.active_key
             running = slot.trainer_thread is not None and slot.trainer_thread.is_alive()
 
-            # 背景顏色
+            # 背景顏色（確保值在 0-255 範圍內）
             base_color = desc.color
-            bg = tuple(int(c * (1.2 if active else 0.8)) for c in base_color)
+            bg = tuple(
+                min(255, max(0, int(c * (1.2 if active else 0.8)))) for c in base_color
+            )
             pygame.draw.rect(self.screen, bg, rect, border_radius=10)
 
             # 外框（繪製在背景之上，不能同時使用 width 和 border_radius）
