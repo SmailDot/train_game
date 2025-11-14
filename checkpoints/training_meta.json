@@ -1,32 +1,32 @@
 {
   "algorithms": {
     "ppo": {
-      "iteration": 4626,
-      "episodes": 764,
-      "viewer_round": 1
+      "iteration": 0,
+      "episodes": 0,
+      "viewer_round": 0
     },
     "sac": {
-      "iteration": 4676,
-      "episodes": 46903,
-      "viewer_round": 26
+      "iteration": 27,
+      "episodes": 75,
+      "viewer_round": 0
     },
     "td3": {
-      "iteration": 8805,
-      "episodes": 295,
+      "iteration": 5,
+      "episodes": 65,
       "viewer_round": 0
     },
     "dqn": {
-      "iteration": 11392,
-      "episodes": 590467,
+      "iteration": 176,
+      "episodes": 204,
       "viewer_round": 0
     },
     "double_dqn": {
-      "iteration": 8891,
-      "episodes": 407572,
-      "viewer_round": 51
+      "iteration": 4730,
+      "episodes": 0,
+      "viewer_round": 0
     }
   },
   "vector_envs": 16,
-  "active": "sac",
-  "saved_at": "2025-11-14T05:41:30.619348Z"
+  "active": "ppo",
+  "saved_at": "2025-11-14T06:41:57.982395Z"
 }

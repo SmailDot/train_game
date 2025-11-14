@@ -171,17 +171,34 @@ class GameUI:
         self.loss_surf = pygame.Surface(self.loss_surf_size)
 
     def _register_algorithms(self) -> None:
+        # 檢查 GPU 可用性
+        import torch
+
+        use_cuda = torch.cuda.is_available()
+        device_str = "cuda" if use_cuda else "cpu"
+        if use_cuda:
+            print(f"✅ 檢測到 GPU: {torch.cuda.get_device_name(0)}")
+            print(f"   CUDA 版本: {torch.version.cuda}")
+        else:
+            print("⚠️  未檢測到 GPU，使用 CPU 訓練")
+
+        # 根據 training_config 設定參數
+        from utils.training_config import TrainingConfig
+
+        config = TrainingConfig(use_gpu=use_cuda)
+        ppo_kwargs = config.get_ppo_kwargs()
+
         descriptors = [
             AlgorithmDescriptor(
                 key="ppo",
                 name="PPO",
-                trainer_factory=PPOTrainer,
+                trainer_factory=lambda: PPOTrainer(**ppo_kwargs),
                 use_vector_envs=True,
-                vector_envs=4,
+                vector_envs=config.get_recommended_n_envs(),
                 hotkey=pygame.K_1,
                 action_label="1",
                 color=(120, 200, 255),
-                window_title="PPO 訓練視窗",
+                window_title=f"PPO 訓練視窗 ({device_str.upper()})",
             )
         ]
 
@@ -1448,7 +1465,7 @@ class GameUI:
         return new_state
 
     def _handle_init_training(self):
-        print("🔄 初始化訓練（重設並重新啟動背景訓練）...")
+        print("🔄 初始化訓練參數（不刪除現有資料）...")
         if self.starting_ai:
             print("AI 訓練初始化中，請稍候完成後再試。")
             return None
@@ -1477,21 +1494,17 @@ class GameUI:
                 pass
             self.mode = "Menu"
 
-        # 停止任何背景訓練並重置狀態
+        # 停止任何背景訓練並重置狀態（但保留訓練資料）
         self._stop_algorithm_training(wait=True)
         self.agent = None
 
-        slot.iterations = 0
+        # 不刪除訓練進度，只重置顯示計數器
         slot.ai_round = 0
-        slot.n = 0
         slot.viewer_round = 0
-        try:
-            self._save_training_meta(0, 0)
-        except Exception:
-            pass
 
-        # 重新啟動背景訓練（跳過既有模型）
-        self._start_ai_training_async(force_reset=True)
+        # 不自動啟動訓練，需要用戶點擊 "AI 訓練" 按鈕
+        self.ai_status = "idle"
+        print("✅ 初始化完成，訓練資料已保留。請點擊 'AI 訓練' 按鈕開始訓練。")
         return None
 
     def _draw_loss_plot(self, x, y, w, h):
@@ -1852,7 +1865,9 @@ class GameUI:
             # 如果遊戲暫停或結束，只渲染不更新
             if self.paused or self.game_over:
                 self.screen.fill(self.BG_COLOR)
-                self._draw_algorithm_panel()  # 繪製左側演算法面板
+                # 只在非 AI 模式時顯示演算法面板
+                if self.mode != "AI":
+                    self._draw_algorithm_panel()
                 self.draw_playfield(s)
                 self.draw_panel()
                 if self.paused:
@@ -1945,7 +1960,7 @@ class GameUI:
                     )
 
                     self.screen.fill(self.BG_COLOR)
-                    self._draw_algorithm_panel()  # 繪製左側演算法面板
+                    # AI 模式下不顯示演算法面板
                     self.draw_playfield(s)
                     self.draw_panel()
                     pygame.display.flip()
@@ -1959,7 +1974,9 @@ class GameUI:
 
             # render
             self.screen.fill(self.BG_COLOR)
-            self._draw_algorithm_panel()  # 繪製左側演算法面板
+            # AI 訓練模式下不顯示演算法面板
+            if self.mode != "AI":
+                self._draw_algorithm_panel()
             self.draw_playfield(s)
             self.draw_panel()
             if self.game_over:

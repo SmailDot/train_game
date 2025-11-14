@@ -198,6 +198,12 @@
     "note": null
   },
   {
+    "name": "AI-PPO",
+    "score": 10,
+    "iteration": 730,
+    "note": "PPO 第730次訓練"
+  },
+  {
     "name": "AI",
     "score": 5,
     "iteration": 489,
@@ -292,11 +298,5 @@
     "score": 5,
     "iteration": 4193,
     "note": "(第4,193次訓練)"
-  },
-  {
-    "name": "AI",
-    "score": 5,
-    "iteration": 4210,
-    "note": "(第4,210次訓練)"
   }
 ]

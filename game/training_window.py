@@ -243,17 +243,17 @@ def _draw_losses(
     }
 
     descriptions = {
-        "policy": ("策略網路損失", "控制動作調整幅度"),
-        "value": ("價值網路誤差", "評估狀態好壞"),
-        "entropy": ("探索程度", "越高越隨機"),
-        "total": ("綜合損失", "整體訓練表現"),
+        "policy": "Policy Loss (action adjustment)",
+        "value": "Value Loss (state evaluation)",
+        "entropy": "Entropy (exploration level)",
+        "total": "Total Loss (overall performance)",
     }
 
-    legend_width = min(280, area.width // 2)
+    legend_width = min(320, area.width // 2)
     legend_x = area.x + 16
     legend_y = area.y + 18
     body_line = fonts["body"].get_linesize()
-    line_height = body_line + 18
+    line_height = body_line + 8  # 減少行高避免重疊
 
     max_points = max((len(values) for values in histories.values()), default=0)
     if max_points < 2:
@@ -266,14 +266,16 @@ def _draw_losses(
     for idx, key in enumerate(["policy", "value", "entropy", "total"]):
         color = palette[key]
         y = legend_y + idx * line_height
-        pygame.draw.rect(surface, color, (legend_x, y, 16, 16))
+        pygame.draw.rect(surface, color, (legend_x, y, 14, 14))
         series = histories.get(key, [0])
         latest = series[-1] if series else 0.0
-        label = fonts["body"].render(f"{key.title():<7}: {latest:+.4f}", True, color)
-        surface.blit(label, (legend_x + 24, y - 2))
-        for offset, text_line in enumerate(descriptions[key]):
-            desc_surface = fonts["body"].render(text_line, True, (180, 180, 200))
-            surface.blit(desc_surface, (legend_x + 24, y + 18 + offset * body_line))
+        # 標籤和值在同一行
+        label = fonts["body"].render(f"{key.title()}: {latest:+.4f}", True, color)
+        surface.blit(label, (legend_x + 20, y - 2))
+        # 描述文字在右邊，較淡的顏色
+        desc_text = descriptions[key]
+        desc_surface = fonts["body"].render(desc_text, True, (140, 140, 160))
+        surface.blit(desc_surface, (legend_x + 150, y - 2))
 
     plot = pygame.Rect(
         legend_x + legend_width,

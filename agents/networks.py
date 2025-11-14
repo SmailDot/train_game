@@ -23,10 +23,15 @@ try:
             return logits, value
 
         def get_weight_matrix(self):
-            """Return actor weights as a tiny 2D array for visualization."""
+            """Return first hidden layer weights for better visualization.
+
+            Returns fc1 weights (input -> hidden1) so we can see all 64
+            hidden nodes' activity.
+            """
             try:
-                w = self.actor.weight.detach().cpu().numpy()
-                return w
+                # 返回第一層權重（5x64），這樣可以看到所有隱藏層節點的變化
+                w = self.fc1.weight.detach().cpu().numpy()
+                return w.T  # 轉置為 (5, 64) 方便可視化
             except Exception:
                 return None
 
