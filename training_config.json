@@ -1,5 +1,35 @@
 {
     "_comment": "訓練參數配置文件 - 可在訓練過程中修改（每10個迭代重新讀取）",
+    
+    "lr_scheduler": {
+        "_comment": "學習率調度器 - 自動調整學習率以提升訓練效果",
+        "type": "adaptive",
+        "_type_options": [
+            "none - 不使用調度器",
+            "step - 階梯式衰減（每N個迭代降低）",
+            "exponential - 指數衰減（平滑連續降低）",
+            "cosine - 餘弦退火（平滑衰減到最小值）",
+            "reduce_on_plateau - 性能停滯時降低",
+            "adaptive - 自定義自適應（推薦）"
+        ],
+        "patience": 30,
+        "_patience_comment": "無改善的迭代次數閾值",
+        "factor": 0.5,
+        "_factor_comment": "學習率衰減因子（新學習率 = 舊學習率 × factor）",
+        "min_lr": 1e-6,
+        "_min_lr_comment": "學習率最小值",
+        "improvement_threshold": 0.01,
+        "_improvement_threshold_comment": "判定為改善的獎勵提升比例",
+        "step_size": 100,
+        "_step_size_comment": "（step模式）每N個迭代降低學習率",
+        "gamma": 0.9,
+        "_gamma_comment": "（step/exponential模式）衰減因子",
+        "T_max": 500,
+        "_T_max_comment": "（cosine模式）餘弦週期長度",
+        "eta_min": 1e-6,
+        "_eta_min_comment": "（cosine模式）最小學習率"
+    },
+    
     "gpu_training": {
         "batch_size": 256,
         "ppo_epochs": 10,

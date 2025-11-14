@@ -62,13 +62,131 @@ try:
             self.config_path = Path(__file__).parent.parent / "training_config.json"
             self._last_config_check = 0
 
+            # 學習率調度器配置
+            self.initial_lr = lr
+            self.scheduler_config = self._load_scheduler_config()
+            self._setup_lr_scheduler()
+
             print(f"💾 配置文件路徑: {self.config_path}")
             print("   可在訓練過程中修改此文件來調整參數")
+            print(f"🎯 學習率調度器: {self.scheduler_config.get('type', 'none')}")
             self.save_dir = save_dir
             os.makedirs(save_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
 
-        def _load_dynamic_config(self, iteration):
+        def _load_scheduler_config(self):
+            """從配置文件加載學習率調度器設置"""
+            try:
+                if self.config_path.exists():
+                    with open(self.config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                    return config.get("lr_scheduler", {"type": "none"})
+            except Exception:
+                pass
+            return {"type": "none"}
+
+        def _setup_lr_scheduler(self):
+            """設置學習率調度器"""
+            scheduler_type = self.scheduler_config.get("type", "none")
+
+            # 性能追蹤（用於自適應調度）
+            self.best_reward = float("-inf")
+            self.patience_counter = 0
+            self.lr_history = [self.initial_lr]
+
+            if scheduler_type == "step":
+                # 階梯式衰減：每 N 個迭代降低學習率
+                step_size = self.scheduler_config.get("step_size", 100)
+                gamma = self.scheduler_config.get("gamma", 0.9)
+                self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                    self.opt, step_size=step_size, gamma=gamma
+                )
+                print(f"   每 {step_size} 迭代學習率 ×{gamma} (階梯式衰減)")
+
+            elif scheduler_type == "exponential":
+                # 指數衰減：每個迭代都衰減
+                gamma = self.scheduler_config.get("gamma", 0.999)
+                self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                    self.opt, gamma=gamma
+                )
+                print(f"   每迭代學習率 ×{gamma} (指數衰減)")
+
+            elif scheduler_type == "reduce_on_plateau":
+                # 基於性能：獎勵停滯時降低學習率
+                patience = self.scheduler_config.get("patience", 20)
+                factor = self.scheduler_config.get("factor", 0.5)
+                self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    self.opt,
+                    mode="max",
+                    factor=factor,
+                    patience=patience,
+                    verbose=True,
+                )
+                print(f"   獎勵停滯 {patience} 次後學習率 ×{factor} (性能自適應)")
+
+            elif scheduler_type == "cosine":
+                # 餘弦退火：平滑衰減到最小值
+                T_max = self.scheduler_config.get("T_max", 500)
+                eta_min = self.scheduler_config.get("eta_min", 1e-6)
+                self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    self.opt, T_max=T_max, eta_min=eta_min
+                )
+                print(f"   {T_max} 迭代內餘弦衰減至 {eta_min} (餘弦退火)")
+
+            elif scheduler_type == "adaptive":
+                # 自定義自適應策略（不使用 PyTorch 內建）
+                self.lr_scheduler = None
+                patience = self.scheduler_config.get("patience", 30)
+                factor = self.scheduler_config.get("factor", 0.5)
+                min_lr = self.scheduler_config.get("min_lr", 1e-6)
+                print(
+                    f"   自適應調整：{patience}次無改善→學習率×{factor}，最低{min_lr}"
+                )
+
+            else:
+                # 不使用調度器
+                self.lr_scheduler = None
+                print("   不使用學習率調度")
+
+        def _update_lr_adaptive(self, mean_reward, iteration):
+            """自定義自適應學習率更新邏輯"""
+            if self.scheduler_config.get("type") != "adaptive":
+                return
+
+            if mean_reward is None:
+                return
+
+            patience = self.scheduler_config.get("patience", 30)
+            factor = self.scheduler_config.get("factor", 0.5)
+            min_lr = self.scheduler_config.get("min_lr", 1e-6)
+            improvement_threshold = self.scheduler_config.get(
+                "improvement_threshold", 0.01
+            )
+
+            # 檢查是否有顯著改善
+            if mean_reward > self.best_reward * (1 + improvement_threshold):
+                self.best_reward = mean_reward
+                self.patience_counter = 0
+                print(f"   📈 新最佳獎勵: {mean_reward:.2f}")
+            else:
+                self.patience_counter += 1
+
+            # 如果停滯太久，降低學習率
+            if self.patience_counter >= patience:
+                current_lr = self.opt.param_groups[0]["lr"]
+                new_lr = max(current_lr * factor, min_lr)
+
+                if new_lr != current_lr:
+                    for param_group in self.opt.param_groups:
+                        param_group["lr"] = new_lr
+                    self.lr = new_lr
+                    self.lr_history.append(new_lr)
+                    print(f"\n📉 學習率自適應調整: {current_lr:.6f} → {new_lr:.6f}")
+                    print(f"   原因: {patience} 次迭代無顯著改善")
+                    self.patience_counter = 0
+                else:
+                    print(f"\n⚠️ 學習率已達最小值 {min_lr:.6f}，無法再降低")
+
             """每10個迭代檢查並加載配置文件更新"""
             if iteration % 10 != 0:
                 return False
@@ -661,6 +779,31 @@ try:
                             print("  仍在學習中，繼續訓練...")
 
                     print(f"{'='*60}\n")
+
+                # 更新學習率調度器
+                if self.lr_scheduler is not None:
+                    scheduler_type = self.scheduler_config.get("type", "none")
+                    if (
+                        scheduler_type == "reduce_on_plateau"
+                        and mean_reward is not None
+                    ):
+                        # ReduceLROnPlateau 需要監控指標
+                        self.lr_scheduler.step(mean_reward)
+                    elif scheduler_type in ["step", "exponential", "cosine"]:
+                        # 其他調度器基於迭代次數
+                        self.lr_scheduler.step()
+
+                # 自定義自適應學習率調整
+                if it % 10 == 0:  # 每10次迭代檢查一次
+                    self._update_lr_adaptive(mean_reward, it)
+
+                    # 顯示當前學習率
+                    current_lr = self.opt.param_groups[0]["lr"]
+                    if abs(current_lr - self.initial_lr) > 1e-9:
+                        print(
+                            f"📊 當前學習率: {current_lr:.6f} "
+                            f"(初始: {self.initial_lr:.6f})"
+                        )
 
                 # callback for UI or external monitor
                 try:
