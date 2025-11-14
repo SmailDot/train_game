@@ -1899,6 +1899,36 @@ class GameUI:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(self.leaderboard, f, ensure_ascii=False, indent=2)
 
+    def _check_and_update_best_checkpoint(self, current_score, iteration_idx):
+        """遊戲回合結束時，檢查是否打破記錄並立即更新 checkpoint_best.pt"""
+        import shutil
+
+        # 讀取歷史最高分
+        historical_best = 0
+        if self.leaderboard:
+            historical_best = max(entry.get("score", 0) for entry in self.leaderboard)
+
+        # 如果打破記錄
+        if current_score > historical_best:
+            # 找到最近的檢查點（訓練迭代是10的倍數）
+            nearest_checkpoint_iter = (iteration_idx // 10) * 10
+            checkpoint_path = os.path.join(
+                "checkpoints", f"checkpoint_{nearest_checkpoint_iter}.pt"
+            )
+            best_path = os.path.join("checkpoints", "checkpoint_best.pt")
+
+            # 如果檢查點存在，立即更新 checkpoint_best.pt
+            if os.path.exists(checkpoint_path):
+                try:
+                    shutil.copy2(checkpoint_path, best_path)
+                    print(
+                        f"💎 立即更新最佳檢查點: checkpoint_best.pt "
+                        f"(來源: checkpoint_{nearest_checkpoint_iter}.pt, "
+                        f"遊戲回合 #{iteration_idx}, 分數: {current_score})"
+                    )
+                except Exception as e:
+                    print(f"⚠️  更新最佳檢查點失敗: {e}")
+
     def _load_training_meta(self):
         path = os.path.join("checkpoints", "training_meta.json")
         if not os.path.exists(path):
@@ -2165,6 +2195,12 @@ class GameUI:
                     )[:50]
                     try:
                         self._save_scores()
+                    except Exception:
+                        pass
+
+                    # 檢查是否打破歷史記錄，立即更新 checkpoint_best.pt
+                    try:
+                        self._check_and_update_best_checkpoint(score, iteration_idx)
                     except Exception:
                         pass
 

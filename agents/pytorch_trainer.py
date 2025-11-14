@@ -518,7 +518,8 @@ try:
 
                 # 讀取歷史最佳分數
                 historical_best_score = float("-inf")
-                current_iter_score = 0
+                recent_best_score = 0
+                recent_best_iter = None
 
                 if os.path.exists(scores_file):
                     try:
@@ -535,18 +536,22 @@ try:
                                 if score > historical_best_score:
                                     historical_best_score = score
 
-                                # 檢查當前迭代的分數
-                                if iter_num == iteration:
-                                    current_iter_score = score
+                                # 檢查最近20次迭代內的最高分
+                                # （因為遊戲回合和訓練迭代不同步）
+                                if (
+                                    iter_num >= iteration - 20
+                                    and iter_num <= iteration
+                                    and score > recent_best_score
+                                ):
+                                    recent_best_score = score
+                                    recent_best_iter = iter_num
 
                     except Exception as e:
                         print(f"   ⚠️ 讀取 scores.json 失敗: {e}")
 
-                # 如果當前分數是歷史最高，保存為 checkpoint_best.pt
-                if (
-                    current_iter_score > 0
-                    and current_iter_score >= historical_best_score
-                ):
+                # 如果最近有新的歷史最高分，保存為 checkpoint_best.pt
+                if recent_best_score > 0 and recent_best_score >= historical_best_score:
+                    # 使用當前迭代的檢查點（因為最近的回合用的就是當前模型）
                     checkpoint_path = os.path.join(
                         self.save_dir, f"checkpoint_{iteration}.pt"
                     )
@@ -558,16 +563,18 @@ try:
                             shutil.copy2(checkpoint_path, best_path)
                             print(
                                 f"💎 更新最佳檢查點: checkpoint_best.pt "
-                                f"(迭代 #{iteration}, 分數: {current_iter_score})"
+                                f"(檢查點迭代 #{iteration}, "
+                                f"遊戲回合 #{recent_best_iter}, "
+                                f"分數: {recent_best_score})"
                             )
                         except Exception as e:
                             print(f"⚠️  更新最佳檢查點失敗: {e}")
                 elif (
                     mean_reward is not None
                     and mean_reward > self.best_reward
-                    and current_iter_score == 0
+                    and recent_best_score == 0
                 ):
-                    # 如果 scores.json 中沒有當前迭代的記錄，fallback 到使用 mean_reward
+                    # 如果 scores.json 中沒有最近的記錄，fallback 到使用 mean_reward
                     try:
                         torch.save(
                             {
