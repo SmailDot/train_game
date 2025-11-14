@@ -251,75 +251,109 @@ try:
         def _check_performance_degradation(
             self, mean_reward, max_reward, min_reward, iteration
         ):
-            """檢測性能嚴重退化並回檔到最佳檢查點"""
+            """檢測性能嚴重退化並回檔到最佳檢查點
+
+            使用 scores.json 的真實遊戲分數來判斷，而不是訓練窗口的獎勵
+            """
             # 只有在有足夠訓練歷史時才檢查（至少 100 次迭代）
             if iteration < 100:
                 return False
 
-            # 只有在所有獎勵都有效時才檢查
-            if (
-                mean_reward is None
-                or max_reward is None
-                or min_reward is None
-                or self.best_reward <= 0
-            ):
+            # 讀取 scores.json 獲取真實遊戲表現
+            scores_file = os.path.join(self.save_dir, "scores.json")
+            if not os.path.exists(scores_file):
                 return False
 
-            # 計算各指標的下降比例
-            mean_drop = (self.best_reward - mean_reward) / abs(self.best_reward)
-            max_drop = (
-                (self.best_max_reward - max_reward) / abs(self.best_max_reward)
-                if self.best_max_reward > 0
-                else 0
-            )
-            min_drop = (
-                (self.best_min_reward - min_reward) / abs(self.best_min_reward)
-                if self.best_min_reward > 0
-                else 0
-            )
+            try:
+                with open(scores_file, "r", encoding="utf-8") as f:
+                    scores_data = json.load(f)
 
-            # 放寬退化閾值：從 40% 改為 70%，給予更多探索空間
-            degradation_threshold = 0.70
+                if not scores_data or len(scores_data) < 20:
+                    return False  # 數據不足，不檢測
 
-            # 檢測崩潰條件（任一指標嚴重下降）
-            is_catastrophic = (
-                mean_drop > degradation_threshold
-                or max_drop > degradation_threshold
-                or (
-                    min_drop > degradation_threshold and self.best_min_reward > 10
-                )  # 最低分只有在原本較高時才關注
-            )
+                # 獲取最近 50 個遊戲回合的分數
+                recent_window = 50
+                recent_scores = [
+                    entry.get("score", 0)
+                    for entry in scores_data[:recent_window]
+                    if entry.get("iteration", 0) >= iteration - 100
+                ]
 
-            if is_catastrophic:
-                print(f"\n{'='*60}")
-                print("⚠️⚠️⚠️ 檢測到性能崩潰！⚠️⚠️⚠️")
-                print(f"{'='*60}")
-                print("📉 當前指標 vs 最佳記錄：")
-                print(
-                    f"   平均分: {mean_reward:.2f} (最佳: {self.best_reward:.2f}) "
-                    f"↓ {mean_drop*100:.1f}%"
+                if len(recent_scores) < 10:
+                    return False  # 最近數據不足
+
+                # 計算最近表現的統計數據
+                recent_mean = np.mean(recent_scores)
+                recent_max = np.max(recent_scores)
+                recent_min = np.min(recent_scores)
+
+                # 獲取歷史最佳表現（前 20% 的分數）
+                top_20_percent = max(10, len(scores_data) // 5)
+                historical_best_scores = [
+                    entry.get("score", 0) for entry in scores_data[:top_20_percent]
+                ]
+                historical_mean = np.mean(historical_best_scores)
+                historical_max = np.max(historical_best_scores)
+
+                # 計算性能下降比例
+                mean_drop = (
+                    (historical_mean - recent_mean) / historical_mean
+                    if historical_mean > 0
+                    else 0
                 )
-                print(
-                    f"   最高分: {max_reward:.2f} (最佳: {self.best_max_reward:.2f}) "
-                    f"↓ {max_drop*100:.1f}%"
+                max_drop = (
+                    (historical_max - recent_max) / historical_max
+                    if historical_max > 0
+                    else 0
                 )
-                print(
-                    f"   最低分: {min_reward:.2f} (最佳: {self.best_min_reward:.2f}) "
-                    f"↓ {min_drop*100:.1f}%"
+
+                # 嚴格的崩潰條件：
+                # 1. 最近平均分下降超過 70%
+                # 2. 且最近最高分也下降超過 60%
+                # 3. 且最近平均分低於 300（絕對閾值）
+                is_catastrophic = (
+                    mean_drop > 0.70 and max_drop > 0.60 and recent_mean < 300
                 )
-                print("\n🔄 正在回檔到最佳檢查點...")
 
-                # 執行回檔
-                success = self._rollback_to_best_checkpoint()
+                if is_catastrophic:
+                    print(f"\n{'='*60}")
+                    print("⚠️⚠️⚠️ 檢測到性能崩潰！⚠️⚠️⚠️")
+                    print(f"{'='*60}")
+                    print("📉 真實遊戲表現 vs 歷史最佳：")
+                    print(
+                        f"   最近50局平均: {recent_mean:.1f} "
+                        f"(歷史最佳: {historical_mean:.1f}) ↓ {mean_drop*100:.1f}%"
+                    )
+                    print(
+                        f"   最近50局最高: {recent_max:.0f} "
+                        f"(歷史最高: {historical_max:.0f}) ↓ {max_drop*100:.1f}%"
+                    )
+                    print(f"   最近50局最低: {recent_min:.0f}")
+                    print(
+                        f"\n📊 最近分數分布: " f"{[int(s) for s in recent_scores[:10]]}"
+                    )
+                    print("\n🔄 正在回檔到最佳檢查點...")
 
-                if success:
-                    print("✅ 成功回檔！繼續訓練...")
-                    print(f"{'='*60}\n")
-                    return True
-                else:
-                    print("❌ 回檔失敗，繼續當前訓練...")
-                    print(f"{'='*60}\n")
-                    return False
+                    # 執行回檔
+                    success = self._rollback_to_best_checkpoint()
+
+                    if success:
+                        print("✅ 成功回檔！繼續訓練...")
+                        print(f"{'='*60}\n")
+                        return True
+                    else:
+                        print("❌ 回檔失敗，繼續當前訓練...")
+                        print(f"{'='*60}\n")
+                        return False
+
+                # 如果表現良好，更新最佳記錄（用於比較）
+                if recent_mean > getattr(self, "_best_game_score", 0):
+                    self._best_game_score = recent_mean
+                    print(f"   🎮 遊戲表現良好！最近平均: {recent_mean:.1f} 分")
+
+            except Exception as e:
+                print(f"   ⚠️ 讀取 scores.json 失敗: {e}")
+                return False
 
             return False
 
