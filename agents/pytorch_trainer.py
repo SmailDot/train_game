@@ -326,7 +326,121 @@ try:
         def _rollback_to_best_checkpoint(self):
             """回檔到最佳檢查點"""
             try:
-                # 尋找最佳檢查點（基於迭代次數）
+                print("\n🔄 正在回檔到最佳檢查點...")
+
+                # 優先嘗試載入 checkpoint_best.pt
+                best_checkpoint = os.path.join(self.save_dir, "checkpoint_best.pt")
+                if os.path.exists(best_checkpoint):
+                    try:
+                        print("   📂 優先嘗試載入最佳檢查點: checkpoint_best.pt")
+                        checkpoint = torch.load(
+                            best_checkpoint, map_location=self.device
+                        )
+
+                        # 載入模型狀態
+                        if "model_state" in checkpoint:
+                            self.net.load_state_dict(checkpoint["model_state"])
+                            print("      ✓ 模型參數已載入")
+                        else:
+                            raise ValueError("檢查點格式錯誤")
+
+                        # 載入優化器狀態
+                        if "optimizer_state" in checkpoint:
+                            self.opt.load_state_dict(checkpoint["optimizer_state"])
+                            print("      ✓ 優化器狀態已載入")
+
+                        # 重置 patience 計數器
+                        self.patience_counter = 0
+
+                        # 重置學習率為初始值的50%
+                        rollback_lr = self.initial_lr * 0.5
+                        for param_group in self.opt.param_groups:
+                            param_group["lr"] = rollback_lr
+                        print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")
+
+                        best_iter = checkpoint.get("iteration", "unknown")
+                        best_score = checkpoint.get("mean_reward", "unknown")
+                        print(
+                            f"\n   ✅ 成功從最佳檢查點回檔！"
+                            f"(迭代 #{best_iter}, 平均分: {best_score})"
+                        )
+                        return True
+
+                    except Exception as e:
+                        print(f"      ✗ 最佳檢查點載入失敗: {e}")
+                        print("   📂 嘗試從分數記錄中尋找歷史最佳檢查點...")
+
+                # 如果 checkpoint_best.pt 不存在或載入失敗，從 scores.json 中尋找
+                scores_file = os.path.join(self.save_dir, "scores.json")
+                best_iteration = None
+                best_score = float("-inf")
+
+                if os.path.exists(scores_file):
+                    try:
+                        with open(scores_file, "r", encoding="utf-8") as f:
+                            scores_data = json.load(f)
+
+                        # scores.json 是一個陣列格式
+                        if isinstance(scores_data, list):
+                            for entry in scores_data:
+                                score = entry.get("score", 0)
+                                iteration = entry.get("iteration", 0)
+                                if score > best_score:
+                                    best_score = score
+                                    best_iteration = iteration
+
+                        if best_iteration is not None:
+                            best_checkpoint_path = os.path.join(
+                                self.save_dir, f"checkpoint_{best_iteration}.pt"
+                            )
+                            if os.path.exists(best_checkpoint_path):
+                                print(
+                                    f"   📂 找到歷史最佳檢查點: "
+                                    f"checkpoint_{best_iteration}.pt "
+                                    f"(分數: {best_score})"
+                                )
+                                checkpoint = torch.load(
+                                    best_checkpoint_path, map_location=self.device
+                                )
+
+                                # 載入模型狀態
+                                if "model_state" in checkpoint:
+                                    self.net.load_state_dict(checkpoint["model_state"])
+                                    print("      ✓ 模型參數已載入")
+                                else:
+                                    raise ValueError("檢查點格式錯誤")
+
+                                # 載入優化器狀態
+                                if "optimizer_state" in checkpoint:
+                                    self.opt.load_state_dict(
+                                        checkpoint["optimizer_state"]
+                                    )
+                                    print("      ✓ 優化器狀態已載入")
+
+                                # 重置 patience 計數器
+                                self.patience_counter = 0
+
+                                # 重置學習率
+                                rollback_lr = self.initial_lr * 0.5
+                                for param_group in self.opt.param_groups:
+                                    param_group["lr"] = rollback_lr
+                                print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")
+
+                                print(
+                                    f"\n   ✅ 成功從迭代 #{best_iteration} 回檔！"
+                                    f"(分數: {best_score})"
+                                )
+                                return True
+                            else:
+                                print(
+                                    f"   ⚠️ 最佳檢查點檔案已不存在: "
+                                    f"checkpoint_{best_iteration}.pt"
+                                )
+                    except Exception as e:
+                        print(f"   ⚠️ 讀取分數記錄失敗: {e}")
+
+                # 如果還是找不到，回退到最近的檢查點
+                print("   📂 從現有檢查點中尋找...")
                 checkpoints = []
                 for file in os.listdir(self.save_dir):
                     if file.startswith("checkpoint_") and file.endswith(".pt"):
@@ -393,6 +507,88 @@ try:
 
                 traceback.print_exc()
                 return False
+
+        def _update_best_checkpoint(
+            self, iteration, mean_reward, max_reward, min_reward
+        ):
+            """檢查並更新最佳檢查點（基於 scores.json 的分數記錄）"""
+            try:
+                best_path = os.path.join(self.save_dir, "checkpoint_best.pt")
+                scores_file = os.path.join(self.save_dir, "scores.json")
+
+                # 讀取歷史最佳分數
+                historical_best_score = float("-inf")
+                current_iter_score = 0
+
+                if os.path.exists(scores_file):
+                    try:
+                        with open(scores_file, "r", encoding="utf-8") as f:
+                            scores_data = json.load(f)
+
+                        # scores.json 是一個陣列格式
+                        if isinstance(scores_data, list):
+                            for entry in scores_data:
+                                score = entry.get("score", 0)
+                                iter_num = entry.get("iteration", 0)
+
+                                # 記錄歷史最高分
+                                if score > historical_best_score:
+                                    historical_best_score = score
+
+                                # 檢查當前迭代的分數
+                                if iter_num == iteration:
+                                    current_iter_score = score
+
+                    except Exception as e:
+                        print(f"   ⚠️ 讀取 scores.json 失敗: {e}")
+
+                # 如果當前分數是歷史最高，保存為 checkpoint_best.pt
+                if (
+                    current_iter_score > 0
+                    and current_iter_score >= historical_best_score
+                ):
+                    checkpoint_path = os.path.join(
+                        self.save_dir, f"checkpoint_{iteration}.pt"
+                    )
+                    if os.path.exists(checkpoint_path):
+                        try:
+                            # 複製檢查點檔案
+                            import shutil
+
+                            shutil.copy2(checkpoint_path, best_path)
+                            print(
+                                f"💎 更新最佳檢查點: checkpoint_best.pt "
+                                f"(迭代 #{iteration}, 分數: {current_iter_score})"
+                            )
+                        except Exception as e:
+                            print(f"⚠️  更新最佳檢查點失敗: {e}")
+                elif (
+                    mean_reward is not None
+                    and mean_reward > self.best_reward
+                    and current_iter_score == 0
+                ):
+                    # 如果 scores.json 中沒有當前迭代的記錄，fallback 到使用 mean_reward
+                    try:
+                        torch.save(
+                            {
+                                "model_state": self.net.state_dict(),
+                                "optimizer_state": self.opt.state_dict(),
+                                "iteration": iteration,
+                                "mean_reward": mean_reward,
+                                "max_reward": max_reward,
+                                "min_reward": min_reward,
+                            },
+                            best_path,
+                        )
+                        print(
+                            f"💎 保存最佳檢查點: {best_path} "
+                            f"(平均獎勵: {mean_reward:.2f})"
+                        )
+                    except Exception as e:
+                        print(f"⚠️  保存最佳檢查點失敗: {e}")
+
+            except Exception as e:
+                print(f"⚠️  檢查最佳檢查點時發生錯誤: {e}")
 
         def _load_dynamic_config(self, iteration):
             """每10個迭代檢查並加載配置文件更新"""
@@ -1064,27 +1260,10 @@ try:
                     cp = self.save(it)
                     print(f"Saved checkpoint {cp}")
 
-                    # 如果當前表現是歷史最佳，額外保存一個 "best" 檢查點
-                    if mean_reward is not None and mean_reward > self.best_reward:
-                        best_path = os.path.join(self.save_dir, "checkpoint_best.pt")
-                        try:
-                            torch.save(
-                                {
-                                    "model_state": self.net.state_dict(),
-                                    "optimizer_state": self.opt.state_dict(),
-                                    "iteration": it,
-                                    "mean_reward": mean_reward,
-                                    "max_reward": max_reward,
-                                    "min_reward": min_reward,
-                                },
-                                best_path,
-                            )
-                            print(
-                                f"💎 保存最佳檢查點: {best_path} "
-                                f"(平均分: {mean_reward:.2f})"
-                            )
-                        except Exception as e:
-                            print(f"⚠️  保存最佳檢查點失敗: {e}")
+                    # 檢查並更新最佳檢查點（基於 training_meta.json 中的分數記錄）
+                    self._update_best_checkpoint(
+                        it, mean_reward, max_reward, min_reward
+                    )
 
                 if total_timesteps is not None and timesteps >= total_timesteps:
                     break
