@@ -10,7 +10,9 @@ Notes:
 - For faster training use vectorized envs (multiprocessing) and larger batch sizes.
 """
 
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 
@@ -43,7 +45,9 @@ try:
                 else torch.device("cpu")
             )
             self.net = ActorCritic().to(self.device)
-            self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
+
+            # 存儲初始參數（用於動態更新）
+            self.lr = lr
             self.gamma = gamma
             self.lam = lam
             self.clip_eps = clip_eps
@@ -51,9 +55,94 @@ try:
             self.ent_coef = ent_coef
             self.batch_size = batch_size
             self.ppo_epochs = ppo_epochs
+
+            self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
+
+            # 配置文件路徑
+            self.config_path = Path(__file__).parent.parent / "training_config.json"
+            self._last_config_check = 0
+
+            print(f"💾 配置文件路徑: {self.config_path}")
+            print("   可在訓練過程中修改此文件來調整參數")
             self.save_dir = save_dir
             os.makedirs(save_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=os.path.join(save_dir, "tb"))
+
+        def _load_dynamic_config(self, iteration):
+            """每10個迭代檢查並加載配置文件更新"""
+            if iteration % 10 != 0:
+                return False
+
+            if not self.config_path.exists():
+                return False
+
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+
+                # 根據設備類型選擇配置
+                mode = "gpu_training" if self.device.type == "cuda" else "cpu_training"
+                params = config.get(mode, {})
+
+                updated = False
+                updates = []
+
+                # 檢查並更新學習率
+                new_lr = params.get("learning_rate")
+                if new_lr and abs(new_lr - self.lr) > 1e-9:
+                    self.lr = new_lr
+                    for param_group in self.opt.param_groups:
+                        param_group["lr"] = new_lr
+                    updates.append(f"學習率: {new_lr}")
+                    updated = True
+
+                # 更新其他參數
+                if "gamma" in params and params["gamma"] != self.gamma:
+                    self.gamma = params["gamma"]
+                    updates.append(f"gamma: {self.gamma}")
+                    updated = True
+
+                if "gae_lambda" in params and params["gae_lambda"] != self.lam:
+                    self.lam = params["gae_lambda"]
+                    updates.append(f"lambda: {self.lam}")
+                    updated = True
+
+                if "clip_range" in params and params["clip_range"] != self.clip_eps:
+                    self.clip_eps = params["clip_range"]
+                    updates.append(f"clip: {self.clip_eps}")
+                    updated = True
+
+                if "vf_coef" in params and params["vf_coef"] != self.vf_coef:
+                    self.vf_coef = params["vf_coef"]
+                    updates.append(f"vf_coef: {self.vf_coef}")
+                    updated = True
+
+                if "ent_coef" in params and params["ent_coef"] != self.ent_coef:
+                    self.ent_coef = params["ent_coef"]
+                    updates.append(f"ent_coef: {self.ent_coef}")
+                    updated = True
+
+                if "batch_size" in params and params["batch_size"] != self.batch_size:
+                    self.batch_size = params["batch_size"]
+                    updates.append(f"batch_size: {self.batch_size}")
+                    updated = True
+
+                if "ppo_epochs" in params and params["ppo_epochs"] != self.ppo_epochs:
+                    self.ppo_epochs = params["ppo_epochs"]
+                    updates.append(f"ppo_epochs: {self.ppo_epochs}")
+                    updated = True
+
+                if updated:
+                    print("\n⚙️ 參數已從配置文件更新:")
+                    for update in updates:
+                        print(f"   • {update}")
+                    print()
+
+                return updated
+
+            except Exception as e:
+                print(f"⚠️ 無法讀取配置文件: {e}")
+                return False
 
         def build_agent(self):
             agent = PPOAgent()
@@ -88,6 +177,7 @@ try:
         def _collect_trajectory_vectorized(self, vec_env, horizon, stop_event=None):
             """使用向量化環境並行收集軌跡"""
             n_envs = len(vec_env)
+            print(f"🚀 使用 {n_envs} 個並行環境收集數據...")
             states = vec_env.reset()  # shape: (n_envs, state_dim)
             episode_returns = [0.0 for _ in range(n_envs)]
 
@@ -392,6 +482,9 @@ try:
             it = initial_iteration
 
             while True:
+                # 檢查並更新配置（每10次迭代）
+                self._load_dynamic_config(it)
+
                 # honor external stop request
                 if (
                     stop_event is not None
@@ -416,9 +509,164 @@ try:
                 mean_reward = float(np.mean(ep_rewards)) if ep_rewards else None
                 episode_count = len(ep_rewards)
 
+                # 儲存歷史數據用於比較
+                if not hasattr(self, "_history"):
+                    self._history = {
+                        "loss": [],
+                        "policy_loss": [],
+                        "value_loss": [],
+                        "entropy": [],
+                        "mean_reward": [],
+                        "weight_mean": [],
+                        "weight_std": [],
+                        "grad_norm": [],
+                    }
+
+                self._history["loss"].append(loss)
+                self._history["policy_loss"].append(ploss)
+                self._history["value_loss"].append(vloss)
+                self._history["entropy"].append(ent)
+                if mean_reward is not None:
+                    self._history["mean_reward"].append(mean_reward)
+
+                # 打印詳細的訓練診斷信息（每10次迭代）
+                if it % 10 == 0:
+                    print(f"\n{'='*60}")
+                    print(f"訓練迭代 #{it}")
+                    print(f"{'='*60}")
+                    print("📊 Loss 指標:")
+                    print(f"  總損失: {loss:.4f}")
+                    print(f"  策略損失: {ploss:.4f}")
+                    print(f"  價值損失: {vloss:.4f}")
+                    print(f"  熵值: {ent:.4f}")
+                    print("\n🎮 訓練效果:")
+                    if mean_reward is not None:
+                        print(f"  平均獎勵: {mean_reward:.2f}")
+                    else:
+                        print("  平均獎勵: N/A (尚未完成任何回合)")
+                    print(f"  完成回合數: {episode_count}")
+                    print(f"  總時間步: {timesteps}")
+
+                    # 顯示並行環境信息
+                    if hasattr(env_list, "__len__") and len(env_list) > 1:
+                        print("\n🔄 並行環境:")
+                        print(f"  環境數量: {len(env_list)}")
+                        print(f"  理論加速: {len(env_list)}x")
+
+                    print("\n⚙️ 網路狀態:")
+                    # 檢查網路權重是否在更新
+                    current_w_mean = 0.0
+                    current_w_std = 0.0
+                    try:
+                        w = self.net.get_weight_matrix()
+                        if w is not None:
+                            current_w_mean = float(np.mean(np.abs(w)))
+                            current_w_std = float(np.std(w))
+                            print(f"  權重平均值: {current_w_mean:.6f}")
+                            print(f"  權重標準差: {current_w_std:.6f}")
+
+                            # 儲存權重歷史
+                            self._history["weight_mean"].append(current_w_mean)
+                            self._history["weight_std"].append(current_w_std)
+                        else:
+                            print("  權重: 無法獲取")
+                    except Exception as e:
+                        print(f"  權重: 獲取失敗 ({e})")
+
+                    # 檢查梯度
+                    grad_norms = []
+                    for param in self.net.parameters():
+                        if param.grad is not None:
+                            grad_norms.append(float(param.grad.norm().item()))
+                    if grad_norms:
+                        avg_grad = np.mean(grad_norms)
+                        print(f"  平均梯度範數: {avg_grad:.6f}")
+                        self._history["grad_norm"].append(avg_grad)
+
+                        if avg_grad < 1e-6:
+                            print("  ⚠️ 警告: 梯度過小，權重可能未正確更新！")
+                        elif avg_grad > 0.001:
+                            print("  ✅ 梯度正常，權重正在更新")
+                    else:
+                        print("  梯度: 無")
+
+                    # 與上次迭代比較 (如果有歷史數據)
+                    if len(self._history["loss"]) >= 2:
+                        print(f"\n📈 與上次比較 (迭代 #{it-10}):")
+
+                        loss_change = loss - self._history["loss"][-2]
+                        loss_arrow = "📉" if loss_change < 0 else "📈"
+                        print(f"  總損失: {loss_change:+.4f} {loss_arrow}")
+
+                        ploss_change = ploss - self._history["policy_loss"][-2]
+                        print(f"  策略損失: {ploss_change:+.4f}")
+
+                        vloss_change = vloss - self._history["value_loss"][-2]
+                        print(f"  價值損失: {vloss_change:+.4f}")
+
+                        ent_change = ent - self._history["entropy"][-2]
+                        print(f"  熵值: {ent_change:+.4f}")
+
+                        if len(self._history["weight_mean"]) >= 2:
+                            w_mean_change = (
+                                current_w_mean - self._history["weight_mean"][-2]
+                            )
+                            w_std_change = (
+                                current_w_std - self._history["weight_std"][-2]
+                            )
+                            print(f"  權重平均: {w_mean_change:+.6f}")
+                            print(f"  權重標準差: {w_std_change:+.6f}")
+
+                            if abs(w_mean_change) < 1e-6 and abs(w_std_change) < 1e-6:
+                                print("  ⚠️ 權重幾乎沒有變化！")
+                            else:
+                                print("  ✅ 權重正在更新")
+
+                        if len(self._history["mean_reward"]) >= 2:
+                            reward_change = (
+                                self._history["mean_reward"][-1]
+                                - self._history["mean_reward"][-2]
+                            )
+                            reward_arrow = "📈" if reward_change > 0 else "📉"
+                            print(f"  平均獎勵: {reward_change:+.2f} {reward_arrow}")
+
+                    # 學習進度評估
+                    if mean_reward is not None:
+                        if mean_reward > 20:
+                            print("\n✅ 學習進度: 優秀 (獎勵 > 20)")
+                        elif mean_reward > 10:
+                            print("\n📈 學習進度: 良好 (獎勵 > 10)")
+                        elif mean_reward > 5:
+                            print("\n⚡ 學習進度: 進步中 (獎勵 > 5)")
+                        elif mean_reward > 0:
+                            print("\n🔄 學習進度: 緩慢 (獎勵 > 0)")
+                        else:
+                            print("\n⚠️ 學習進度: 需要調整 (獎勵 < 0)")
+                            print("   建議: 檢查獎勵函數、降低學習率或調整網路結構")
+                    else:
+                        # 即使沒有完成回合，也顯示學習狀態
+                        print("\n🔄 學習狀態:")
+                        if loss < 0.05:
+                            print(f"  損失很低 ({loss:.4f})，但沒有完成回合")
+                            print("  可能原因: 遊戲太難、獎勵函數問題")
+                        elif ent < 0.05:
+                            print(f"  熵值過低 ({ent:.4f})，策略可能過早收斂")
+                            print("  建議: 增加 ent_coef 或重置訓練")
+                        else:
+                            print("  仍在學習中，繼續訓練...")
+
+                    print(f"{'='*60}\n")
+
                 # callback for UI or external monitor
                 try:
                     if metrics_callback is not None:
+                        # 獲取網路權重用於視覺化
+                        weight_matrix = None
+                        try:
+                            weight_matrix = self.net.get_weight_matrix()
+                        except Exception:
+                            pass
+
                         metrics_callback(
                             {
                                 "it": it,
@@ -429,6 +677,7 @@ try:
                                 "timesteps": int(timesteps),
                                 "mean_reward": mean_reward,
                                 "episode_count": episode_count,
+                                "weights": weight_matrix,
                             }
                         )
                 except Exception:

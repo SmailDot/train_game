@@ -56,6 +56,7 @@ class GameUI:
         self.mode = "Menu"
         self.selected_mode = None
         self.running = False
+        self._last_layout_mode = None  # 追蹤上次佈局計算時的模式
 
         # fonts and counters - 使用支持中文的字體
         chinese_fonts = [
@@ -133,6 +134,7 @@ class GameUI:
         self.btn_speed = pygame.Rect(0, 0, 0, 0)
         self.btn_parallel = pygame.Rect(0, 0, 0, 0)
         self.btn_multi_view = pygame.Rect(0, 0, 0, 0)  # 多視窗觀看按鈕
+        self.btn_clear_board = None  # 清除排行榜按鈕（只在排行榜模式顯示）
         self._btn_save_template = pygame.Rect(0, 0, 0, 0)
         self.btn_save = None
         self._update_layout(self.width, self.height)
@@ -533,17 +535,27 @@ class GameUI:
         self.HEIGHT = height
 
         # 調整布局：左側為演算法控制區，右側為狀態面板
+        # 當 AI 訓練時，演算法面板隱藏，遊戲區域擴展到左側
         algo_panel_width = max(380, int(width * 0.32))
         if algo_panel_width > width - 420:
             algo_panel_width = max(360, width - 420)
 
         status_panel_width = max(320, int(width * 0.25))
-        play_width = max(400, width - algo_panel_width - status_panel_width)
+
+        # 根據模式動態調整遊戲區域
+        if self.mode == "AI" and self.running:
+            # AI 訓練時，遊戲區域從最左邊開始
+            play_start_x = 0
+            play_width = max(400, width - status_panel_width)
+        else:
+            # 其他模式，遊戲區域從演算法面板右側開始
+            play_start_x = algo_panel_width
+            play_width = max(400, width - algo_panel_width - status_panel_width)
 
         self.algo_panel = pygame.Rect(0, 0, algo_panel_width, height)
-        self.play_area = pygame.Rect(algo_panel_width, 0, play_width, height)
+        self.play_area = pygame.Rect(play_start_x, 0, play_width, height)
         self.panel = pygame.Rect(
-            algo_panel_width + play_width, 0, status_panel_width, height
+            play_start_x + play_width, 0, status_panel_width, height
         )
 
         btn_width = self.panel.width - 40
@@ -715,39 +727,53 @@ class GameUI:
                 self.play_area.left + (self.play_area.width - empty.get_width()) // 2
             )
             self.screen.blit(empty, (empty_x, 160))
-            return
+        else:
+            columns = 2
+            rows_per_column = 10
+            column_width = self.play_area.width // columns
+            base_x = self.play_area.left + 60
+            base_y = 130
+            line_height = 32
 
-        columns = 2
-        rows_per_column = 10
-        column_width = self.play_area.width // columns
-        base_x = self.play_area.left + 60
-        base_y = 130
-        line_height = 32
+            label_color = (220, 220, 230)
+            value_color = (200, 200, 210)
 
-        label_color = (220, 220, 230)
-        value_color = (200, 200, 210)
+            for idx, entry in enumerate(entries):
+                column = idx // rows_per_column
+                row = idx % rows_per_column
+                x = base_x + column * column_width
+                y = base_y + row * line_height
+                name = entry.get("name", "-")
+                score = int(entry.get("score", 0))
+                note = entry.get("note")
+                iteration = entry.get("iteration")
 
-        for idx, entry in enumerate(entries):
-            column = idx // rows_per_column
-            row = idx % rows_per_column
-            x = base_x + column * column_width
-            y = base_y + row * line_height
-            name = entry.get("name", "-")
-            score = int(entry.get("score", 0))
-            note = entry.get("note")
-            iteration = entry.get("iteration")
+                rank_text = f"{idx + 1:>2}. {name:<8}"
+                rank_surface = self.font.render(rank_text, True, label_color)
+                self.screen.blit(rank_surface, (x, y))
 
-            rank_text = f"{idx + 1:>2}. {name:<8}"
-            rank_surface = self.font.render(rank_text, True, label_color)
-            self.screen.blit(rank_surface, (x, y))
+                detail = f"{score:>4} 分"
+                if note:
+                    detail += f" {note}"
+                elif entry.get("name") == "AI" and isinstance(iteration, int):
+                    detail += f" (第{iteration:,}次訓練)"
+                detail_surface = self.font.render(detail, True, value_color)
+                self.screen.blit(detail_surface, (x + 180, y))
 
-            detail = f"{score:>4} 分"
-            if note:
-                detail += f" {note}"
-            elif entry.get("name") == "AI" and isinstance(iteration, int):
-                detail += f" (第{iteration:,}次訓練)"
-            detail_surface = self.font.render(detail, True, value_color)
-            self.screen.blit(detail_surface, (x + 180, y))
+        # 清除歷史紀錄按鈕
+        btn_width = 200
+        btn_height = 50
+        btn_x = self.play_area.left + (self.play_area.width - btn_width) // 2
+        btn_y = self.play_area.bottom - 120
+        self.btn_clear_board = pygame.Rect(btn_x, btn_y, btn_width, btn_height)
+
+        pygame.draw.rect(
+            self.screen, (180, 60, 60), self.btn_clear_board, border_radius=8
+        )
+        clear_text = self.large_font.render("移除歷史紀錄", True, (255, 255, 255))
+        clear_x = self.btn_clear_board.centerx - clear_text.get_width() // 2
+        clear_y = self.btn_clear_board.centery - clear_text.get_height() // 2
+        self.screen.blit(clear_text, (clear_x, clear_y))
 
         hint = self.font.render("再次點擊『排行榜』返回選單", True, (150, 150, 160))
         hint_x = self.play_area.left + (self.play_area.width - hint.get_width()) // 2
@@ -835,7 +861,28 @@ class GameUI:
             metric_surface = self.font.render(metric_text, True, status_color)
             self.screen.blit(metric_surface, (rect.x + 16, rect.y + 64))
 
-            # 啟動/停止按鈕
+            # 初始化按鈕（在左側）
+            init_rect = pygame.Rect(rect.right - 180, rect.y + 12, 76, 30)
+            init_color = (180, 80, 80)
+            init_label = "初始化"
+            pygame.draw.rect(self.screen, init_color, init_rect, border_radius=6)
+            # 按鈕外框
+            for i in range(2):
+                inflated_btn = init_rect.inflate(-i * 2, -i * 2)
+                pygame.draw.rect(
+                    self.screen, (40, 40, 50), inflated_btn, 1, border_radius=6
+                )
+
+            init_text = self.font.render(init_label, True, (255, 255, 255))
+            self.screen.blit(
+                init_text,
+                (
+                    init_rect.centerx - init_text.get_width() // 2,
+                    init_rect.centery - init_text.get_height() // 2,
+                ),
+            )
+
+            # 啟動/停止按鈕（在右側）
             toggle_rect = pygame.Rect(rect.right - 90, rect.y + 12, 76, 62)
             toggle_color = (230, 100, 100) if running else (100, 220, 120)
             toggle_label = "停止" if running else "啟動"
@@ -859,6 +906,7 @@ class GameUI:
             self.algorithm_rects[key] = {
                 "select": rect,
                 "toggle": toggle_rect,
+                "init": init_rect,
             }
 
             y += entry_height + spacing
@@ -1046,39 +1094,47 @@ class GameUI:
 
             ai_info_bottom = info_y_cursor
 
-        # leaderboard - 簡潔顯示（為 AI 信息留出空間）
-        lb_top = score_y + 120
-        if self.mode == "AI" and self.running:
-            lb_top = max(lb_top, ai_info_bottom + 32)
-        lb_title = self.large_font.render("排行榜 Top 5", True, (200, 200, 220))
-        self.screen.blit(lb_title, (self.panel.left + 20, lb_top))
+        # leaderboard - 簡潔顯示（只在非 AI 訓練模式下顯示）
+        lb_bottom = score_y + 120  # 預設位置
+        if not (self.mode == "AI" and self.running):
+            lb_top = score_y + 120
+            lb_title = self.large_font.render("排行榜 Top 5", True, (200, 200, 220))
+            self.screen.blit(lb_title, (self.panel.left + 20, lb_top))
 
-        sorted_entries = sorted(
-            self.leaderboard, key=lambda x: x.get("score", 0), reverse=True
-        )
-        lb_entries = min(len(sorted_entries), 5)
-        for idx, entry in enumerate(sorted_entries[:5]):
-            name = entry.get("name", "-")
-            score = int(entry.get("score", 0))
-            iteration = entry.get("iteration")
-            rank_text = f"{idx+1}. {name}: {score}"
-            note = entry.get("note")
-            if note:
-                rank_text += f" {note}"
-            elif (
-                entry.get("name") == "AI"
-                and isinstance(iteration, int)
-                and iteration >= 0
-            ):
-                rank_text += f" (第{iteration:,}次訓練)"
-            t = self.font.render(rank_text, True, (180, 180, 200))
-            self.screen.blit(t, (self.panel.left + 25, lb_top + 40 + idx * 28))
+            sorted_entries = sorted(
+                self.leaderboard, key=lambda x: x.get("score", 0), reverse=True
+            )
+            lb_entries = min(len(sorted_entries), 5)
+            for idx, entry in enumerate(sorted_entries[:5]):
+                name = entry.get("name", "-")
+                score = int(entry.get("score", 0))
+                iteration = entry.get("iteration")
+                rank_text = f"{idx+1}. {name}: {score}"
+                note = entry.get("note")
+                if note:
+                    rank_text += f" {note}"
+                elif (
+                    entry.get("name") == "AI"
+                    and isinstance(iteration, int)
+                    and iteration >= 0
+                ):
+                    rank_text += f" (第{iteration:,}次訓練)"
+                t = self.font.render(rank_text, True, (180, 180, 200))
+                self.screen.blit(t, (self.panel.left + 25, lb_top + 40 + idx * 28))
 
-        lb_bottom = lb_top + 40 + lb_entries * 28
+            lb_bottom = lb_top + 40 + lb_entries * 28
+        elif self.mode == "AI" and self.running:
+            # AI 訓練模式下，lb_bottom 使用 AI 信息的底部位置
+            lb_bottom = (
+                ai_info_bottom if "ai_info_bottom" in locals() else score_y + 120
+            )
 
         plot_w, plot_h = self.loss_surf_size
         plot_x = self.panel.left + 20
-        content_anchor = max(ai_info_bottom + 20, lb_bottom + 20)
+        content_anchor = max(
+            ai_info_bottom if "ai_info_bottom" in locals() else score_y + 120,
+            lb_bottom + 20,
+        )
         max_y = self.panel.bottom - plot_h - 20
         if max_y > self.panel.top + 40 and max_y >= content_anchor:
             plot_y = max(content_anchor, self.panel.top + 40)
@@ -1234,6 +1290,9 @@ class GameUI:
         self.paused = False
         self.viewer_round = 0
 
+        # 重新計算佈局以擴展遊戲區域
+        self._update_layout(self.width, self.height)
+
         # 重置 AI 顯示資訊
         self.last_ai_action = None
         self.last_ai_action_prob = 0.0
@@ -1365,13 +1424,23 @@ class GameUI:
             self._handle_cycle_parallel_envs()
             return None
 
-        # Algorithm selection / toggle
+        # Algorithm selection / toggle / init
         for key, rects in self.algorithm_rects.items():
             toggle_rect = rects.get("toggle")
             select_rect = rects.get("select")
+            init_rect = rects.get("init")
+
+            # 初始化按鈕（優先處理，因為它在內部）
+            if init_rect is not None and init_rect.collidepoint(pos):
+                self._handle_init_training(algorithm_key=key)
+                return None
+
+            # 啟動/停止按鈕
             if toggle_rect is not None and toggle_rect.collidepoint(pos):
                 self._handle_algorithm_toggle(key)
                 return None
+
+            # 選擇演算法
             if select_rect is not None and select_rect.collidepoint(pos):
                 self._set_active_algorithm(key)
                 return None
@@ -1402,6 +1471,16 @@ class GameUI:
                 self.game_over = False
                 self.mode = "Board"
             return None
+
+        # 清除排行榜按鈕（只在排行榜模式下才有效）
+        if self.mode == "Board" and self.btn_clear_board is not None:
+            if self.btn_clear_board.collidepoint(pos):
+                # 清除所有排行榜紀錄
+                self.leaderboard = []
+                self._save_scores()
+                print("✅ 已清除所有排行榜紀錄")
+                return None
+
         if not self.running and self.btn_multi_view.collidepoint(pos):
             # 啟動多視窗觀看模式
             self._launch_multi_window_view()
@@ -1464,8 +1543,30 @@ class GameUI:
 
         return new_state
 
-    def _handle_init_training(self):
-        print("🔄 初始化訓練參數（不刪除現有資料）...")
+    def _handle_init_training(self, algorithm_key: Optional[str] = None):
+        """初始化指定演算法的訓練資料（刪除模型和訓練進度）
+
+        Args:
+            algorithm_key: 要初始化的演算法鍵值。如果為 None，則使用當前活躍的演算法。
+        """
+        # 確定要初始化的演算法
+        if algorithm_key is None:
+            slot = self._active_slot()
+            if slot is None:
+                print("⚠️ 沒有選擇的演算法")
+                return None
+            algorithm_key = self.ai_manager.active_key
+        else:
+            slot = self.ai_manager.state(algorithm_key)
+            if slot is None:
+                print(f"⚠️ 找不到演算法: {algorithm_key}")
+                return None
+
+        desc = self.ai_manager.descriptor(algorithm_key)
+        algo_name = desc.name if desc else algorithm_key
+
+        print(f"�️ 初始化 {algo_name} 訓練資料（刪除所有進度）...")
+
         if self.starting_ai:
             print("AI 訓練初始化中，請稍候完成後再試。")
             return None
@@ -1474,18 +1575,25 @@ class GameUI:
             print("請先結束人類遊戲模式，再進行訓練初始化。")
             return None
 
-        # 更新狀態顯示
-        self.ai_status = "resetting"
-        self.agent_ready = False
-        self.last_ai_action = None
-        self.last_ai_action_prob = 0.0
-        self.last_ai_value = 0.0
+        # 如果這是當前活躍的演算法，更新狀態顯示
+        if algorithm_key == self.ai_manager.active_key:
+            self.ai_status = "resetting"
+            self.agent_ready = False
+            self.last_ai_action = None
+            self.last_ai_action_prob = 0.0
+            self.last_ai_value = 0.0
 
-        slot = self._active_slot()
-        if slot is None:
-            return None
+        # 如果正在訓練這個演算法，停止訓練
+        if slot.trainer_thread is not None and slot.trainer_thread.is_alive():
+            print(f"⏸️ 停止 {algo_name} 的訓練...")
+            self._stop_algorithm_training(algorithm_key, wait=True)
 
-        if self.mode == "AI" and self.running:
+        # 如果當前在 AI 模式使用這個演算法，返回選單
+        if (
+            self.mode == "AI"
+            and self.running
+            and algorithm_key == self.ai_manager.active_key
+        ):
             self.running = False
             self.current_score = 0.0
             try:
@@ -1494,17 +1602,61 @@ class GameUI:
                 pass
             self.mode = "Menu"
 
-        # 停止任何背景訓練並重置狀態（但保留訓練資料）
-        self._stop_algorithm_training(wait=True)
         self.agent = None
 
-        # 不刪除訓練進度，只重置顯示計數器
+        # 刪除訓練進度
+        slot.iterations = 0
         slot.ai_round = 0
         slot.viewer_round = 0
+        slot.loss_history = {"policy": [], "value": [], "entropy": [], "total": []}
 
-        # 不自動啟動訓練，需要用戶點擊 "AI 訓練" 按鈕
-        self.ai_status = "idle"
-        print("✅ 初始化完成，訓練資料已保留。請點擊 'AI 訓練' 按鈕開始訓練。")
+        # 刪除模型檔案
+        checkpoint_dir = "checkpoints"
+        if os.path.exists(checkpoint_dir):
+            import glob
+
+            # 刪除這個演算法的所有 checkpoint 檔案
+            # 支援兩種命名格式：
+            # {algorithm_key}_checkpoint_*.pt 和 checkpoint_*.pt
+            patterns = [
+                os.path.join(checkpoint_dir, f"{algorithm_key}_checkpoint_*.pt"),
+                os.path.join(
+                    checkpoint_dir, "checkpoint_*.pt"
+                ),  # 舊格式（如果是當前活躍演算法）
+            ]
+
+            deleted_count = 0
+            # 如果這是當前活躍的演算法，也刪除沒有前綴的檔案
+            if algorithm_key == self.ai_manager.active_key:
+                for pattern in patterns:
+                    files = glob.glob(pattern)
+                    for f in files:
+                        try:
+                            os.remove(f)
+                            print(f"  ✓ 已刪除: {os.path.basename(f)}")
+                            deleted_count += 1
+                        except Exception as e:
+                            print(f"  ✗ 無法刪除 {os.path.basename(f)}: {e}")
+            else:
+                # 如果不是活躍演算法，只刪除有前綴的檔案
+                files = glob.glob(patterns[0])
+                for f in files:
+                    try:
+                        os.remove(f)
+                        print(f"  ✓ 已刪除: {os.path.basename(f)}")
+                        deleted_count += 1
+                    except Exception as e:
+                        print(f"  ✗ 無法刪除 {os.path.basename(f)}: {e}")
+
+            if deleted_count == 0:
+                print(f"  ℹ️ 沒有找到 {algo_name} 的 checkpoint 檔案")
+
+        # 更新狀態
+        slot.status = "idle"
+        if algorithm_key == self.ai_manager.active_key:
+            self.ai_status = "idle"
+
+        print(f"✅ {algo_name} 初始化完成，所有訓練資料已清除。")
         return None
 
     def _draw_loss_plot(self, x, y, w, h):
@@ -1850,6 +2002,11 @@ class GameUI:
 
             # if not running (menu mode), only render and wait for user to click start
             if not self.running:
+                # 檢查模式是否改變，需要重新計算佈局
+                if self._last_layout_mode != (self.mode, self.running):
+                    self._update_layout(self.width, self.height)
+                    self._last_layout_mode = (self.mode, self.running)
+
                 # render only - don't step the environment
                 self.screen.fill(self.BG_COLOR)
                 self._draw_algorithm_panel()  # 繪製左側演算法面板
@@ -1861,6 +2018,11 @@ class GameUI:
                 pygame.display.flip()
                 self.clock.tick(self.FPS)
                 continue
+
+            # 檢查模式是否改變，需要重新計算佈局（運行中）
+            if self._last_layout_mode != (self.mode, self.running):
+                self._update_layout(self.width, self.height)
+                self._last_layout_mode = (self.mode, self.running)
 
             # 如果遊戲暫停或結束，只渲染不更新
             if self.paused or self.game_over:

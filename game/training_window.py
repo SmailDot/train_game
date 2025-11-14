@@ -243,39 +243,47 @@ def _draw_losses(
     }
 
     descriptions = {
-        "policy": "Policy Loss (action adjustment)",
-        "value": "Value Loss (state evaluation)",
-        "entropy": "Entropy (exploration level)",
-        "total": "Total Loss (overall performance)",
+        "policy": ["衡量當前策略與", "最佳策略的差距"],
+        "value": ["評估狀態價值", "預測的準確性"],
+        "entropy": ["動作選擇的", "隨機性程度"],
+        "total": ["所有損失的加權總和", ""],
     }
 
-    legend_width = min(320, area.width // 2)
+    legend_width = min(360, area.width // 2)
     legend_x = area.x + 16
     legend_y = area.y + 18
     body_line = fonts["body"].get_linesize()
-    line_height = body_line + 8  # 減少行高避免重疊
 
     max_points = max((len(values) for values in histories.values()), default=0)
     if max_points < 2:
-        hint = fonts["body"].render(
-            "Waiting for training data...", True, (160, 160, 160)
-        )
+        hint = fonts["body"].render("等待訓練數據中...", True, (160, 160, 160))
         surface.blit(hint, (area.x + 24, area.y + area.height // 2))
         return
 
+    # 計算每個項目需要的高度（標題+值+說明(2行)+空行）
+    item_spacing = body_line * 4 + 8  # 標題行 + 說明2行 + 空行
+
+    current_y = legend_y
     for idx, key in enumerate(["policy", "value", "entropy", "total"]):
         color = palette[key]
-        y = legend_y + idx * line_height
-        pygame.draw.rect(surface, color, (legend_x, y, 14, 14))
+
+        # 第一行：標題和值
+        pygame.draw.rect(surface, color, (legend_x, current_y + 2, 14, 14))
         series = histories.get(key, [0])
         latest = series[-1] if series else 0.0
-        # 標籤和值在同一行
         label = fonts["body"].render(f"{key.title()}: {latest:+.4f}", True, color)
-        surface.blit(label, (legend_x + 20, y - 2))
-        # 描述文字在右邊，較淡的顏色
-        desc_text = descriptions[key]
-        desc_surface = fonts["body"].render(desc_text, True, (140, 140, 160))
-        surface.blit(desc_surface, (legend_x + 150, y - 2))
+        surface.blit(label, (legend_x + 20, current_y))
+
+        # 第二行和第三行：中文說明（每行最多12字）
+        desc_lines = descriptions[key]
+        desc_y = current_y + body_line + 2
+
+        for line_idx, line_text in enumerate(desc_lines):
+            line_surface = fonts["body"].render(line_text, True, (140, 140, 160))
+            surface.blit(line_surface, (legend_x + 20, desc_y + line_idx * body_line))
+
+        # 移動到下一個項目（包含空行）
+        current_y += item_spacing
 
     plot = pygame.Rect(
         legend_x + legend_width,

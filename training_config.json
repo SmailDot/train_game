@@ -1,0 +1,69 @@
+{
+    "_comment": "訓練參數配置文件 - 可在訓練過程中修改（每10個迭代重新讀取）",
+    "gpu_training": {
+        "batch_size": 256,
+        "ppo_epochs": 10,
+        "learning_rate": 0.00025,
+        "horizon": 4096,
+        "n_envs": 16,
+        "ent_coef": 0.01,
+        "vf_coef": 0.5,
+        "clip_range": 0.2,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "max_grad_norm": 0.5
+    },
+    "cpu_training": {
+        "batch_size": 64,
+        "ppo_epochs": 4,
+        "learning_rate": 0.0003,
+        "horizon": 2048,
+        "n_envs": 4,
+        "ent_coef": 0.01,
+        "vf_coef": 0.5,
+        "clip_range": 0.2,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "max_grad_norm": 0.5
+    },
+    "adjustments": {
+        "_comment_batch_size": "批量大小 - GPU性能差可試試減少到128或64",
+        "_comment_ppo_epochs": "PPO訓練輪數 - 過多可能過擬合，試試減少到4-6",
+        "_comment_learning_rate": "學習率 - 訓練不穩定時降低，進度慢時提高",
+        "_comment_ent_coef": "熵係數 - 增加探索(0.01-0.05)，減少收斂",
+        "_comment_n_envs": "並行環境數 - GPU可用更多，但太多可能降低樣本質量",
+        "_comment_gamma": "折扣因子 - 影響長期vs短期獎勵權衡",
+        "_comment_clip_range": "PPO裁剪範圍 - 控制策略更新幅度"
+    },
+    "troubleshooting": {
+        "gpu_slow_vs_cpu": {
+            "problem": "GPU訓練效果(5分)遠不如CPU(70分)",
+            "possible_causes": [
+                "batch_size太大(256)導致訓練不穩定",
+                "ppo_epochs太多(10)導致過擬合",
+                "並行環境太多(16)降低樣本質量"
+            ],
+            "suggested_fixes": [
+                "將batch_size改為128或64",
+                "將ppo_epochs改為4-6",
+                "將n_envs改為8",
+                "將learning_rate改為0.0003（與CPU一致）"
+            ]
+        },
+        "no_episodes_completing": {
+            "problem": "356k時間步但0個完成回合",
+            "possible_causes": [
+                "遊戲難度太高，智能體立即死亡",
+                "獎勵函數沒有激勵正確行為",
+                "done標誌沒有正確觸發",
+                "環境重置機制故障"
+            ],
+            "diagnostic_steps": [
+                "檢查environment.py的reset()和step()方法",
+                "確認done=True時環境有正確重置",
+                "檢查獎勵是否為0（無激勵）",
+                "嘗試在CPU模式下單環境訓練確認問題"
+            ]
+        }
+    }
+}

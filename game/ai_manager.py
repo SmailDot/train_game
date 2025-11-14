@@ -190,7 +190,11 @@ class AlgorithmManager:
 
         def _callback(metrics: Dict[str, float]):
             self._ingest_metrics(key, metrics)
-            weights = self._extract_weights(agent)
+            # 優先使用 metrics 中的權重（如果有的話）
+            weights = metrics.get("weights")
+            # 如果 metrics 沒有權重，則嘗試從 agent 提取
+            if weights is None:
+                weights = self._extract_weights(agent)
             if slot.training_window is not None:
                 try:
                     slot.training_window.update_data(metrics, weights=weights)

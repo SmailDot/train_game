@@ -141,8 +141,13 @@ class GameEnv:
 
         reward = 0.0  # 移除時間懲罰，讓分數更直觀
         done = False
-        ball_margin = 10.0  # 稍微縮小判定半徑，降低誤判
-        collision_window = 14.0  # 更貼近球心與障礙物的實際接觸範圍
+
+        # 球的半徑（與 UI 中的繪製大小一致）
+        ball_radius = 12.0
+
+        # 碰撞窗口：只有當球心進入障礙物範圍內才檢測碰撞
+        # 原本 collision_window = 14，現在改為 0，表示球心必須與障礙物重疊
+        collision_window = ball_radius  # 球心在障礙物的 x 範圍內
 
         # Check collisions and pass-through events for all obstacles
         for obs in self.obstacles:
@@ -152,23 +157,30 @@ class GameEnv:
             # Player is at x=0, check if obstacle just passed
             if not obs[3] and ob_x <= 0 and ob_x > -current_scroll * 2:
                 obs[3] = True  # Mark as passed
-                # Check if ball was in the gap when passing
-                if gap_top + ball_margin < self.y < gap_bottom - ball_margin:
+                # Check if ball was in the gap when passing (球心在間隙內即可)
+                if gap_top < self.y < gap_bottom:
                     reward += 5.0
                     self.passed_count += 1
 
             # Check collision: obstacle overlaps with player position (x ~= 0)
-            # Player occupies x range roughly [-20, 20]
+            # 只有當球心完全進入障礙物的 x 範圍內才判定碰撞
             if -collision_window < ob_x < collision_window:
                 # Check if ball is outside the gap
-                if not (gap_top + ball_margin < self.y < gap_bottom - ball_margin):
+                # 球心超出間隙範圍，且球體與障礙物實際接觸
+                ball_top = self.y - ball_radius
+                ball_bottom = self.y + ball_radius
+
+                # 檢查球體是否與障礙物頂部或底部碰撞
+                # 球的頂部碰到障礙物底部（gap_top 以上的部分）
+                # 或球的底部碰到障礙物頂部（gap_bottom 以下的部分）
+                if ball_top < gap_top or ball_bottom > gap_bottom:
                     reward -= 5.0
                     done = True
                     break
 
         # collision / out-of-bounds (top/bottom)
-        # hitting ceiling or floor is failure
-        if self.y < 0 or self.y > self.ScreenHeight:
+        # hitting ceiling or floor is failure - 球體完全碰到邊界
+        if self.y - ball_radius < 0 or self.y + ball_radius > self.ScreenHeight:
             reward -= 5.0
             done = True
 
