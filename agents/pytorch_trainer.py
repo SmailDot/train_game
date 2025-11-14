@@ -34,7 +34,7 @@ try:
             lam=0.95,
             clip_eps=0.2,
             vf_coef=0.5,
-            ent_coef=0.05,
+            ent_coef=0.15,  # 從 0.05 提高到 0.15，增加探索
             batch_size=64,
             ppo_epochs=4,
             device=None,
@@ -278,8 +278,8 @@ try:
                 else 0
             )
 
-            # 嚴格的退化閾值：任一指標下降超過 40% 即視為崩潰
-            degradation_threshold = 0.40
+            # 放寬退化閾值：從 40% 改為 70%，給予更多探索空間
+            degradation_threshold = 0.70
 
             # 檢測崩潰條件（任一指標嚴重下降）
             is_catastrophic = (
@@ -352,8 +352,8 @@ try:
                         # 重置 patience 計數器
                         self.patience_counter = 0
 
-                        # 重置學習率為初始值的50%
-                        rollback_lr = self.initial_lr * 0.5
+                        # 重置學習率為初始值（保持學習能力）
+                        rollback_lr = self.initial_lr * 1.0  # 從 0.5 改為 1.0
                         for param_group in self.opt.param_groups:
                             param_group["lr"] = rollback_lr
                         print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")
@@ -420,8 +420,8 @@ try:
                                 # 重置 patience 計數器
                                 self.patience_counter = 0
 
-                                # 重置學習率
-                                rollback_lr = self.initial_lr * 0.5
+                                # 重置學習率為初始值
+                                rollback_lr = self.initial_lr * 1.0  # 從 0.5 改為 1.0
                                 for param_group in self.opt.param_groups:
                                     param_group["lr"] = rollback_lr
                                 print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")
@@ -485,8 +485,8 @@ try:
                         # 重置 patience 計數器
                         self.patience_counter = 0
 
-                        # 重置學習率為初始值或略低的值
-                        rollback_lr = self.initial_lr * 0.5  # 使用稍低的學習率
+                        # 重置學習率為初始值
+                        rollback_lr = self.initial_lr * 1.0  # 從 0.5 改為 1.0
                         for param_group in self.opt.param_groups:
                             param_group["lr"] = rollback_lr
                         print(f"      ✓ 學習率重置為: {rollback_lr:.6f}")

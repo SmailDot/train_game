@@ -1,9 +1,9 @@
 {
   "algorithms": {
     "ppo": {
-      "iteration": 5385,
-      "episodes": 3389,
-      "viewer_round": 23
+      "iteration": 5392,
+      "episodes": 3400,
+      "viewer_round": 4
     },
     "sac": {
       "iteration": 0,
@@ -28,5 +28,5 @@
   },
   "vector_envs": 16,
   "active": "ppo",
-  "saved_at": "2025-11-14T16:08:31.326862Z"
+  "saved_at": "2025-11-14T16:15:07.906453Z"
 }
