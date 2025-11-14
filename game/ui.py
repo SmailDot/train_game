@@ -752,12 +752,15 @@ class GameUI:
             bg = tuple(int(c * (1.2 if active else 0.8)) for c in base_color)
             pygame.draw.rect(self.screen, bg, rect, border_radius=10)
 
-            # 外框
+            # 外框（繪製在背景之上，不能同時使用 width 和 border_radius）
             outline_color = (240, 240, 255) if active else (100, 110, 130)
             outline_width = 3 if active else 2
-            pygame.draw.rect(
-                self.screen, outline_color, rect, outline_width, border_radius=10
-            )
+            # 使用多次繪製來模擬圓角外框
+            for i in range(outline_width):
+                inflated = rect.inflate(-i * 2, -i * 2)
+                pygame.draw.rect(
+                    self.screen, outline_color, inflated, 1, border_radius=10
+                )
 
             # 標籤（演算法名稱 + 快捷鍵）
             label = (
@@ -794,7 +797,12 @@ class GameUI:
             toggle_color = (230, 100, 100) if running else (100, 220, 120)
             toggle_label = "停止" if running else "啟動"
             pygame.draw.rect(self.screen, toggle_color, toggle_rect, border_radius=8)
-            pygame.draw.rect(self.screen, (40, 40, 50), toggle_rect, 2, border_radius=8)
+            # 按鈕外框
+            for i in range(2):
+                inflated_btn = toggle_rect.inflate(-i * 2, -i * 2)
+                pygame.draw.rect(
+                    self.screen, (40, 40, 50), inflated_btn, 1, border_radius=8
+                )
 
             btn_text = self.large_font.render(toggle_label, True, (255, 255, 255))
             self.screen.blit(

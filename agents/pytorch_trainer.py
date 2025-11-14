@@ -63,14 +63,145 @@ try:
             return agent
 
         def collect_trajectory(self, envs=None, horizon=2048, stop_event=None):
-            """Collect a `horizon`-length trajectory across one or more environments."""
+            """Collect a `horizon`-length trajectory across one or more environments.
+
+            Supports both list of environments (sequential) and vectorized environments.
+            """
+            from game.vec_env import SubprocVecEnv
 
             if envs is None:
                 envs = [GameEnv()]
             elif isinstance(envs, GameEnv):
                 envs = [envs]
+
+            # 檢查是否為向量化環境
+            is_vec_env = isinstance(envs, SubprocVecEnv)
+
+            if is_vec_env:
+                # 使用真正的並行環境
+                return self._collect_trajectory_vectorized(envs, horizon, stop_event)
             else:
+                # 使用串行環境（原有邏輯）
                 envs = list(envs) or [GameEnv()]
+                return self._collect_trajectory_sequential(envs, horizon, stop_event)
+
+        def _collect_trajectory_vectorized(self, vec_env, horizon, stop_event=None):
+            """使用向量化環境並行收集軌跡"""
+            n_envs = len(vec_env)
+            states = vec_env.reset()  # shape: (n_envs, state_dim)
+            episode_returns = [0.0 for _ in range(n_envs)]
+
+            batch_states = []
+            actions, rewards, dones, values, logps, next_values = [], [], [], [], [], []
+            ep_rewards = []
+
+            steps = 0
+            while steps < horizon:
+                if (
+                    stop_event is not None
+                    and getattr(stop_event, "is_set", lambda: False)()
+                ):
+                    break
+
+                # 批次處理所有環境的狀態
+                s_batch = torch.tensor(
+                    states, dtype=torch.float32, device=self.device
+                )  # (n_envs, state_dim)
+
+                with torch.no_grad():
+                    logits, vals = self.net(s_batch)  # (n_envs, 1), (n_envs, 1)
+                    probs = torch.sigmoid(logits)
+                    dist = torch.distributions.Bernoulli(probs=probs)
+                    action_tensors = dist.sample()  # (n_envs, 1)
+                    logp = dist.log_prob(action_tensors)  # (n_envs, 1)
+
+                actions_np = action_tensors.cpu().numpy().flatten().astype(int)
+
+                # 並行執行所有環境
+                next_states, rews, dones_arr, infos = vec_env.step(actions_np)
+
+                # 記錄數據
+                for i in range(n_envs):
+                    batch_states.append(states[i])
+                    actions.append(actions_np[i])
+                    rewards.append(rews[i])
+                    dones.append(dones_arr[i])
+                    values.append(vals[i].item())
+                    logps.append(logp[i].item())
+
+                    episode_returns[i] += float(rews[i])
+
+                    if dones_arr[i]:
+                        ep_rewards.append(episode_returns[i])
+                        episode_returns[i] = 0.0
+                        # 計算 next_value (重置後為 0)
+                        next_values.append(0.0)
+                    else:
+                        # 計算 next_value
+                        with torch.no_grad():
+                            s_next_t = torch.tensor(
+                                next_states[i], dtype=torch.float32, device=self.device
+                            ).unsqueeze(0)
+                            _, next_value = self.net(s_next_t)
+                            next_values.append(float(next_value.item()))
+
+                states = next_states
+                steps += n_envs
+
+            if not batch_states:
+                empty = torch.empty((0, 5), dtype=torch.float32, device=self.device)
+                zero = torch.empty((0, 1), dtype=torch.float32, device=self.device)
+                return (
+                    {
+                        "states": empty,
+                        "actions": zero,
+                        "logps": zero,
+                        "returns": zero,
+                        "advs": zero,
+                    },
+                    ep_rewards,
+                )
+
+            # 計算 GAE 優勢
+            if len(next_values) < len(rewards):
+                next_values.extend([0.0] * (len(rewards) - len(next_values)))
+
+            advs = []
+            gae = 0.0
+            for i in reversed(range(len(rewards))):
+                delta = (
+                    rewards[i]
+                    + self.gamma * next_values[i] * (1 - dones[i])
+                    - values[i]
+                )
+                gae = delta + self.gamma * self.lam * (1 - dones[i]) * gae
+                advs.insert(0, gae)
+
+            returns = [adv + val for adv, val in zip(advs, values)]
+
+            return (
+                {
+                    "states": torch.tensor(
+                        batch_states, dtype=torch.float32, device=self.device
+                    ),
+                    "actions": torch.tensor(
+                        actions, dtype=torch.float32, device=self.device
+                    ).unsqueeze(1),
+                    "logps": torch.tensor(
+                        logps, dtype=torch.float32, device=self.device
+                    ).unsqueeze(1),
+                    "returns": torch.tensor(
+                        returns, dtype=torch.float32, device=self.device
+                    ).unsqueeze(1),
+                    "advs": torch.tensor(
+                        advs, dtype=torch.float32, device=self.device
+                    ).unsqueeze(1),
+                },
+                ep_rewards,
+            )
+
+        def _collect_trajectory_sequential(self, envs, horizon, stop_event=None):
+            """使用串行環境收集軌跡（原有邏輯）"""
 
             states = [env.reset() for env in envs]
             episode_returns = [0.0 for _ in envs]
