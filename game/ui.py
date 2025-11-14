@@ -509,13 +509,19 @@ class GameUI:
         self.WIDTH = width
         self.HEIGHT = height
 
-        panel_width = max(340, int(width * 0.28))
-        if panel_width > width - 420:
-            panel_width = max(320, width - 420)
-        play_width = max(400, width - panel_width)
+        # 調整布局：左側為演算法控制區，右側為狀態面板
+        algo_panel_width = max(380, int(width * 0.32))
+        if algo_panel_width > width - 420:
+            algo_panel_width = max(360, width - 420)
 
-        self.play_area = pygame.Rect(0, 0, play_width, height)
-        self.panel = pygame.Rect(play_width, 0, width - play_width, height)
+        status_panel_width = max(320, int(width * 0.25))
+        play_width = max(400, width - algo_panel_width - status_panel_width)
+
+        self.algo_panel = pygame.Rect(0, 0, algo_panel_width, height)
+        self.play_area = pygame.Rect(algo_panel_width, 0, play_width, height)
+        self.panel = pygame.Rect(
+            algo_panel_width + play_width, 0, status_panel_width, height
+        )
 
         btn_width = self.panel.width - 40
         btn_height = 56
@@ -706,83 +712,91 @@ class GameUI:
         hint_x = self.play_area.left + (self.play_area.width - hint.get_width()) // 2
         self.screen.blit(hint, (hint_x, self.play_area.bottom - 60))
 
-    def _draw_algorithm_panel(self, top: int) -> int:
+    def _draw_algorithm_panel(self, top: int = None) -> int:
+        """繪製演算法控制面板在左側區域"""
         keys = self.ai_manager.keys()
         if not keys:
-            return top
+            return 0
 
-        x = self.panel.left + 20
-        width = self.panel.width - 40
-        y = max(top, self.btn_parallel.bottom + 16)
+        # 繪製左側演算法面板背景
+        pygame.draw.rect(self.screen, (25, 25, 35), self.algo_panel)
 
-        title = self.font.render("演算法控制 (按數字鍵切換)", True, (180, 200, 255))
+        x = self.algo_panel.left + 20
+        width = self.algo_panel.width - 40
+        y = 30
+
+        title = self.large_font.render("演算法控制面板", True, (200, 220, 255))
         self.screen.blit(title, (x, y))
-        y += title.get_height() + 6
+        y += title.get_height() + 8
 
-        entry_height = 56
-        spacing = 10
+        subtitle = self.font.render("按數字鍵 1-5 切換演算法", True, (160, 180, 200))
+        self.screen.blit(subtitle, (x, y))
+        y += subtitle.get_height() + 20
+
+        entry_height = 85  # 增加高度避免文字重疊
+        spacing = 14
         self.algorithm_rects = {}
-
-        num = len(keys)
-        cols = 2 if num > 2 else 1
-        col_spacing = 12
-        col_width = (width - (cols - 1) * col_spacing) // cols
 
         for idx, key in enumerate(keys):
             desc = self.ai_manager.descriptor(key)
             slot = self.ai_manager.state(key)
             if slot is None:
                 continue
-            col = idx % cols
-            row = idx // cols
-            rect_x = x + col * (col_width + col_spacing)
-            rect_y = y + row * (entry_height + spacing)
-            rect = pygame.Rect(rect_x, rect_y, col_width, entry_height)
+
+            rect = pygame.Rect(x, y, width, entry_height)
             active = key == self.ai_manager.active_key
             running = slot.trainer_thread is not None and slot.trainer_thread.is_alive()
+
+            # 背景顏色
             base_color = desc.color
-            bg = tuple(int(c * (1.0 if active else 0.6)) for c in base_color)
-            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+            bg = tuple(int(c * (1.2 if active else 0.8)) for c in base_color)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=10)
 
-            outline_color = (240, 240, 255) if active else (120, 130, 150)
-            pygame.draw.rect(self.screen, outline_color, rect, 2, border_radius=8)
+            # 外框
+            outline_color = (240, 240, 255) if active else (100, 110, 130)
+            outline_width = 3 if active else 2
+            pygame.draw.rect(
+                self.screen, outline_color, rect, outline_width, border_radius=10
+            )
 
+            # 標籤（演算法名稱 + 快捷鍵）
             label = (
                 f"[{desc.action_label}] {desc.name}" if desc.action_label else desc.name
             )
-            label_surface = self.font.render(label, True, (20, 20, 30))
+            label_surface = self.large_font.render(label, True, (20, 20, 30))
+            self.screen.blit(label_surface, (rect.x + 16, rect.y + 10))
+
+            # 狀態資訊
             status_map = {
-                "initializing": "初始化",
-                "loading": "載入中",
+                "initializing": "初始化中",
+                "loading": "載入模型",
                 "training": "訓練中",
                 "saving": "儲存中",
                 "saved": "已儲存",
-                "resetting": "重設",
+                "resetting": "重新設定",
                 "error": "錯誤",
                 "idle": "待命",
             }
             status_text = status_map.get(slot.status, slot.status)
-            status_color = (30, 50, 70) if active else (40, 50, 60)
+            status_color = (30, 30, 40)
             status_surface = self.font.render(
                 f"狀態: {status_text}", True, status_color
             )
+            self.screen.blit(status_surface, (rect.x + 16, rect.y + 40))
 
-            metric_text = f"迭代 {slot.iterations:,} 次"
+            # 迭代次數
+            metric_text = f"迭代: {slot.iterations:,} 次"
             metric_surface = self.font.render(metric_text, True, status_color)
+            self.screen.blit(metric_surface, (rect.x + 16, rect.y + 64))
 
-            self.screen.blit(label_surface, (rect.x + 14, rect.y + 6))
-            self.screen.blit(status_surface, (rect.x + 14, rect.y + 24))
-            self.screen.blit(
-                metric_surface, (rect.x + 14, rect.y + 42 - metric_surface.get_height())
-            )
-
-            toggle_rect = pygame.Rect(
-                rect.right - 84, rect.y + 10, 70, rect.height - 20
-            )
-            toggle_color = (230, 120, 120) if running else (120, 200, 140)
+            # 啟動/停止按鈕
+            toggle_rect = pygame.Rect(rect.right - 90, rect.y + 12, 76, 62)
+            toggle_color = (230, 100, 100) if running else (100, 220, 120)
             toggle_label = "停止" if running else "啟動"
-            pygame.draw.rect(self.screen, toggle_color, toggle_rect, border_radius=6)
-            btn_text = self.font.render(toggle_label, True, (0, 0, 0))
+            pygame.draw.rect(self.screen, toggle_color, toggle_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (40, 40, 50), toggle_rect, 2, border_radius=8)
+
+            btn_text = self.large_font.render(toggle_label, True, (255, 255, 255))
             self.screen.blit(
                 btn_text,
                 (
@@ -796,13 +810,12 @@ class GameUI:
                 "toggle": toggle_rect,
             }
 
-        # compute bottom y of the tiled area
-        rows = (num + cols - 1) // cols
-        bottom = y + rows * (entry_height + spacing)
-        return bottom
+            y += entry_height + spacing
+
+        return y
 
     def draw_panel(self):
-        """繪製簡化的側邊面板（只顯示基本信息）"""
+        """繪製右側狀態面板（不包含演算法控制）"""
         if self.mode == "AI" and self.running:
             if self.btn_save is None:
                 self.btn_save = self._btn_save_template.copy()
@@ -851,9 +864,6 @@ class GameUI:
             hint_y = min(hint_y, max(self.btn_parallel.bottom + 4, reserve_y))
         self.screen.blit(hint_surface, (self.panel.left + 24, hint_y))
 
-        algo_top = hint_y + hint_surface.get_height() + 12
-        algo_bottom = self._draw_algorithm_panel(algo_top)
-
         if self.btn_save is not None:
             pygame.draw.rect(self.screen, (90, 90, 100), self.btn_save, border_radius=8)
             save_surface = self.font.render("儲存訓練", True, (235, 235, 235))
@@ -866,7 +876,7 @@ class GameUI:
             )
 
         # mode indicator & current score - 使用更大的間距
-        info_y = max(algo_bottom + 10, hint_y + hint_surface.get_height() + 20)
+        info_y = hint_y + hint_surface.get_height() + 20
         mode_map = {"Human": "人類", "AI": "AI 訓練", "Menu": "選單", "Board": "排行榜"}
         mode_name = mode_map.get(self.mode, str(self.mode))
         mode_text = self.large_font.render("模式", True, (150, 150, 160))
@@ -1016,7 +1026,7 @@ class GameUI:
 
         plot_w, plot_h = self.loss_surf_size
         plot_x = self.panel.left + 20
-        content_anchor = max(algo_bottom + 20, ai_info_bottom + 20, lb_bottom + 20)
+        content_anchor = max(ai_info_bottom + 20, lb_bottom + 20)
         max_y = self.panel.bottom - plot_h - 20
         if max_y > self.panel.top + 40 and max_y >= content_anchor:
             plot_y = max(content_anchor, self.panel.top + 40)
@@ -1734,6 +1744,7 @@ class GameUI:
             if not self.running:
                 # render only - don't step the environment
                 self.screen.fill(self.BG_COLOR)
+                self._draw_algorithm_panel()  # 繪製左側演算法面板
                 self.draw_playfield(s)
                 self.draw_panel()
                 pygame.display.flip()
@@ -1743,6 +1754,7 @@ class GameUI:
             # 如果遊戲暫停或結束，只渲染不更新
             if self.paused or self.game_over:
                 self.screen.fill(self.BG_COLOR)
+                self._draw_algorithm_panel()  # 繪製左側演算法面板
                 self.draw_playfield(s)
                 self.draw_panel()
                 if self.paused:
@@ -1835,6 +1847,7 @@ class GameUI:
                     )
 
                     self.screen.fill(self.BG_COLOR)
+                    self._draw_algorithm_panel()  # 繪製左側演算法面板
                     self.draw_playfield(s)
                     self.draw_panel()
                     pygame.display.flip()
@@ -1848,6 +1861,7 @@ class GameUI:
 
             # render
             self.screen.fill(self.BG_COLOR)
+            self._draw_algorithm_panel()  # 繪製左側演算法面板
             self.draw_playfield(s)
             self.draw_panel()
             if self.game_over:
