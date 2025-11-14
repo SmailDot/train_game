@@ -43,8 +43,9 @@ class TrainingDialog:
         self.selected_algorithm = 0  # 預設選擇 PPO
 
         # Checkpoint 選項
-        self.use_checkpoint = False
-        self.selected_checkpoint_path = None
+        # 預設啟用 checkpoint 並自動選擇最佳檢查點
+        self.use_checkpoint = True
+        self.selected_checkpoint_path = self._get_default_checkpoint()
 
         # 按鈕位置
         self.button_height = 40
@@ -64,6 +65,45 @@ class TrainingDialog:
         self.checkbox_rect = pygame.Rect(self.x + 50, self.y + 340, 20, 20)
 
         self.result = None  # 對話框結果
+
+    def _get_default_checkpoint(self) -> Optional[str]:
+        """獲取預設的 checkpoint 路徑
+
+        優先順序:
+        1. checkpoint_best.pt (最佳檢查點)
+        2. 最新的 checkpoint_*.pt
+        3. None (從頭開始)
+        """
+        # 優先使用最佳檢查點
+        best_checkpoint = os.path.join("checkpoints", "checkpoint_best.pt")
+        if os.path.exists(best_checkpoint):
+            return best_checkpoint
+
+        # 如果沒有最佳檢查點，找最新的
+        checkpoint_dir = "checkpoints"
+        if not os.path.exists(checkpoint_dir):
+            return None
+
+        checkpoints = []
+        for filename in os.listdir(checkpoint_dir):
+            if filename.startswith("checkpoint_") and filename.endswith(".pt"):
+                try:
+                    # 提取迭代數字
+                    iter_num = int(
+                        filename.replace("checkpoint_", "").replace(".pt", "")
+                    )
+                    checkpoints.append(
+                        (iter_num, os.path.join(checkpoint_dir, filename))
+                    )
+                except ValueError:
+                    continue
+
+        if checkpoints:
+            # 返回最新的 checkpoint
+            checkpoints.sort(reverse=True)
+            return checkpoints[0][1]
+
+        return None
 
     def draw(self, screen: pygame.Surface):
         """繪製對話框"""
@@ -162,10 +202,22 @@ class TrainingDialog:
             # 顯示選擇的檔案
             if self.selected_checkpoint_path:
                 filename = os.path.basename(self.selected_checkpoint_path)
-                file_text = self.button_font.render(
-                    f"選擇: {filename}", True, (100, 200, 100)
-                )
+                # 如果是最佳檢查點，用綠色高亮顯示
+                if filename == "checkpoint_best.pt":
+                    file_color = (100, 255, 100)
+                    display_text = f"✓ {filename} (推薦)"
+                else:
+                    file_color = (150, 150, 255)
+                    display_text = f"選擇: {filename}"
+
+                file_text = self.button_font.render(display_text, True, file_color)
                 screen.blit(file_text, (self.x + 50, self.y + 380))
+            else:
+                # 如果沒有選擇，顯示將從頭開始
+                no_file_text = self.button_font.render(
+                    "將從頭開始訓練", True, (200, 200, 100)
+                )
+                screen.blit(no_file_text, (self.x + 50, self.y + 380))
 
         # 開始訓練按鈕
         mouse_pos = pygame.mouse.get_pos()
