@@ -565,6 +565,119 @@ Rₜ = Aₜ + V(sₜ)
 
 ---
 
+## 🧾 訓練公式 (Training formulas)
+
+下面以標準 LaTeX 形式列出常用的訓練公式，包含 PPO（含 GAE）、DQN / Double DQN、SAC（離散版）與 TD3（連續版，供比較）。請保留原文上下文位置（在「深度學習原理」與「損失函數詳解」附近），以便讀者快速參考。
+
+### PPO（含 GAE）
+
+折扣回報（Discounted return）：
+
+$$
+G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k}
+$$
+
+優勢估計（GAE）：
+
+$$
+\begin{aligned}
+\delta_t &= r_t + \gamma V(s_{t+1}) - V(s_t),\\
+\hat{A}_t &= \sum_{l=0}^{\infty} (\gamma \lambda)^l \; \delta_{t+l}.
+\end{aligned}
+$$
+
+裁剪後的 PPO 目標（Clipped objective）：
+
+$$
+L^{\mathrm{CLIP}}(\theta) = -\mathbb{E}_t\left[ \min\left( r_t(\theta) \hat{A}_t, \; \operatorname{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]
+$$
+
+其中
+
+$$
+r_t(\theta) = \frac{\pi_{\theta}(a_t\mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t\mid s_t)}.
+$$
+
+值函數與熵項：
+
+$$
+L^{\mathrm{VF}} = \mathbb{E}_t\big[ (V_{\theta}(s_t) - G_t)^2 \big],\qquad
+S[\pi_{\theta}] = -\sum_a \pi_{\theta}(a\mid s_t) \log \pi_{\theta}(a\mid s_t).
+$$
+
+總損失（policy + value + entropy）：
+
+$$
+L = L^{\mathrm{CLIP}} + c_{vf} L^{\mathrm{VF}} - c_{ent} \; S[\pi_{\theta}]
+$$
+
+---
+
+### DQN / Double DQN（Q-Learning Trainer）
+
+經驗回放樣本的目標值：
+
+$$
+\begin{aligned}
+y_t^{\mathrm{DQN}} &= r_t + \gamma \max_{a'} Q_{\theta^-}(s_{t+1}, a'),\\
+y_t^{\mathrm{DDQN}} &= r_t + \gamma Q_{\theta^-}\bigl(s_{t+1}, \arg\max_{a'} Q_{\theta}(s_{t+1}, a')\bigr).
+\end{aligned}
+$$
+
+平方損失（MSE）：
+
+$$
+L(\theta) = \mathbb{E}_t\big[ (y_t - Q_{\theta}(s_t, a_t))^2 \big].
+$$
+
+---
+
+### SAC（離散版）
+
+Critic 目標（Q-net loss）：
+
+$$
+J_Q = \mathbb{E}\big[ (Q_{\phi}(s_t,a_t) - y_t)^2 \big],
+$$
+
+其中目標值為：
+
+$$
+y_t = r_t + \gamma\; \mathbb{E}_{a_{t+1}\sim\pi}\Big[ \min\big( Q_{\bar{\phi}_1}(s_{t+1},a_{t+1}),\; Q_{\bar{\phi}_2}(s_{t+1},a_{t+1}) \big) - \alpha\,\log\pi(a_{t+1}\mid s_{t+1}) \Big].
+$$
+
+Actor 目標（policy loss）：
+
+$$
+J_{\pi} = \mathbb{E}_{s_t\sim D}\Big[ \mathbb{E}_{a_t\sim\pi}\big[ \alpha \log \pi(a_t\mid s_t) - Q_{\phi}(s_t,a_t) \big] \Big].
+$$
+
+雙網路軟更新（target networks soft update）：
+
+$$
+\bar{\phi} \leftarrow \tau \phi + (1-\tau) \bar{\phi}.
+$$
+
+---
+
+### TD3（連續版，供比較）
+
+TD3 的重點：使用兩個 critic 取最小值、防止高估；以及延遲更新 actor 與 target policy smoothing。
+
+平滑目標動作（target policy smoothing）：
+
+$$
+\tilde{a} = \operatorname{clip}\big(\pi_{\theta^-}(s_{t+1}) + \epsilon,\; a_{\mathrm{low}},\; a_{\mathrm{high}}\big)
+$$
+
+對應目標值：
+
+$$
+y_t = r_t + \gamma \min_{i=1,2} Q_{\phi_i^-}(s_{t+1}, \tilde{a}).
+$$
+
+---
+
 ## 📉 損失函數詳解
 
 ### 🎯 PPO 總損失函數
@@ -1126,77 +1239,6 @@ pip install pre-commit
 pre-commit install
 pre-commit run --all-files
 ```
-
-## 訓練變數與獎勵
-
-- **狀態** $s_t = [y, v_y, x_{obs}, y_{gap\_top}, y_{gap\_bottom}]$（均已正規化）。
-- **動作** $a_t \in \{0,1\}$：0 = 不跳、1 = 跳。
-- **獎勵**：
-   - 通過障礙：$r_{pass} = +5$
-   - 碰撞或飛出上下界：$r_{collision} = -5$
-   - 其他時間步：0（已移除時間懲罰）。
-
-## 訓練公式補充
-
-### PPO（含 GAE）
-
-折扣回報：
-$$G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k}$$
-
-優勢估計（GAE）：
-\begin{aligned}
-\delta_t &= r_t + \gamma V(s_{t+1}) - V(s_t) \\
-\hat{A}_t &= \sum_{l=0}^{\infty} (\gamma \lambda)^l \, \delta_{t+l}
-\end{aligned}
-
-剪裁目標：
-\begin{aligned}
-L^{\text{CLIP}}(\theta) = - \mathbb{E}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \operatorname{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]
-\end{aligned}
-其中 $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$。
-
-值函數與熵項：
-\begin{aligned}
-L^{VF} &= \mathbb{E}_t[(V_\theta(s_t)-G_t)^2] \\
-S[\pi_\theta] &= - \sum_a \pi_\theta(a|s_t)\log\pi_\theta(a|s_t)
-\end{aligned}
-
-總損失：
-$$L = L^{\text{CLIP}} + c_{vf}L^{VF} - c_{ent} S[\pi_\theta]$$
-
-### DQN / Double DQN（QLearningTrainer）
-
-經驗回放樣本的目標值：
-\begin{aligned}
-y_t^{\text{DQN}} &= r_t + \gamma \max_{a'} Q_{\theta^-}(s_{t+1}, a') \\
-y_t^{\text{DDQN}} &= r_t + \gamma Q_{\theta^-}\!\left(s_{t+1}, \arg\max_{a'} Q_{\theta}(s_{t+1}, a')\right)
-\end{aligned}
-
-平方損失：
-$$L(\theta) = \mathbb{E}[(y_t - Q_{\theta}(s_t, a_t))^2]$$
-
-### SAC（離散版）
-
-Critic 目標：
-\begin{aligned}
-J_Q &= \mathbb{E}\left[(Q_{\phi}(s_t,a_t) - y_t)^2\right] \\
-y_t &= r_t + \gamma \mathbb{E}_{a_{t+1}\sim\pi}\left[\min(Q_{\bar{\phi}}(s_{t+1},a_{t+1})) - \alpha\log\pi(a_{t+1}|s_{t+1})\right]
-\end{aligned}
-
-Actor 目標：
-$$J_\pi = \mathbb{E}_{s_t\sim D}\left[\mathbb{E}_{a_t\sim\pi}\left[\alpha \log \pi(a_t|s_t) - Q_{\phi}(s_t,a_t)\right]\right]$$
-
-雙網路軟更新：
-$$\bar{\phi} \leftarrow \tau \phi + (1-\tau) \bar{\phi}$$
-
-### TD3（連續版，供比較）
-
-- 兩個 Critic 取最小值防止 Q-value 高估。
-- 延遲 Actor 更新與 target policy smoothing：
-\begin{aligned}
-	ilde{a} &= \operatorname{clip}(\pi_{\theta^-}(s_{t+1}) + \epsilon, a_{low}, a_{high}) \\
-y_t &= r_t + \gamma \min_i Q_{\phi_i^-}(s_{t+1}, \tilde{a})
-\end{aligned}
 
           │ action               │ value
           ↓                      ↓
