@@ -1,4 +1,5 @@
 import random
+from typing import Optional
 
 import numpy as np
 
@@ -18,19 +19,32 @@ class GameEnv:
     MaxDist = 150  # 減少初始距離，讓障礙物更快到達
     MaxAbsVel = 20.0
     # horizontal scroll speed (pixels per step) base value
-    ScrollSpeed = 3.0  # 增加滾動速度
+    ScrollSpeed = 2.2  # 放慢初始速度，方便早期探索
+    MaxScrollSpeed = 4.2  # 難度逐步提升的上限
     # how much to increase scroll per passed obstacle (fraction per pass)
-    ScrollIncreasePerPass = 0.01  # 降低速度增長率：從 0.02 改為 0.01，避免過快
+    ScrollIncreasePerPass = 0.025  # 每通過一次逐漸加速
+    WarmupSteps = 200  # 起始緩速步數
     # spacing between obstacles (minimum distance)
-    ObstacleSpacing = 250.0
+    ObstacleSpacing = 260.0
+    ObstacleWidth = 40.0  # 垂直障礙物的寬度（需與 UI 一致）
+    CollisionPadding = 4.0  # 額外碰撞緩衝，避免「擦邊通過」的作弊感
     # 勝利條件：達到此分數即通關
     WinningScore = 6666
+
+    # Reward shaping & curriculum knobs
+    AlignmentRewardScale = 0.08
+    VelocityPenaltyScale = 0.02
+    StepPenalty = -0.05
+    GapShrinkPerPass = 0.8
+    MaxGapHalf = 120.0
+    MinGapHalf = 70.0
 
     def __init__(self, seed=None, max_steps=None):
         self.rng = random.Random(seed)
         self.obstacles = []  # list of (x, gap_top, gap_bottom, passed) tuples
         # Optional step limit (None for unlimited play)
         self.max_steps = max_steps
+        self.ball_radius = 12.0
         self.reset()
 
     def reset(self):  # noqa: C901
@@ -43,11 +57,13 @@ class GameEnv:
 
         # Initialize multiple obstacles for smooth scrolling
         self.obstacles = []
+        # number of passed obstacles (used to scale scroll/difficulty)
+        self.passed_count = 0
         # Create initial obstacles spaced out from right edge
         spawn_x = self.MaxDist
         for _ in range(3):  # Start with 3 obstacles visible
             gap_center = self.rng.uniform(150.0, self.ScreenHeight - 150.0)
-            gap_half = self.rng.uniform(80.0, 100.0)  # 增加間隙大小 160-200
+            gap_half = self._sample_gap_half()
             gap_top = gap_center - gap_half
             gap_bottom = gap_center + gap_half
             # (x, gap_top, gap_bottom, passed_flag)
@@ -58,19 +74,31 @@ class GameEnv:
         self.done = False
         # track cumulative score for the current episode
         self.episode_score = 0.0
-        # number of passed obstacles (used to scale scroll/difficulty)
-        self.passed_count = 0
         return self._get_state()
 
-    def _get_state(self):
-        # Find the nearest obstacle ahead of the player (at x ~= 0)
+    def _sample_gap_half(self) -> float:
+        """Sample a gap half-width that shrinks as more obstacles are passed."""
+        shrink = min(
+            self.MaxGapHalf - self.MinGapHalf,
+            self.passed_count * self.GapShrinkPerPass,
+        )
+        max_half = self.MaxGapHalf - shrink
+        min_half = max(self.MinGapHalf, max_half - 20.0)
+        return self.rng.uniform(min_half, max_half)
+
+    def _find_nearest_obstacle(self):
+        """Return the nearest obstacle that is still in front of the player."""
         nearest_obs = None
         min_dist = float("inf")
         for obs in self.obstacles:
-            if obs[0] >= -20:  # Only consider obstacles that haven't passed yet
-                if obs[0] < min_dist:
-                    min_dist = obs[0]
-                    nearest_obs = obs
+            if obs[0] >= -20 and obs[0] < min_dist:
+                min_dist = obs[0]
+                nearest_obs = obs
+        return nearest_obs
+
+    def _get_state(self):
+        # Find the nearest obstacle ahead of the player (at x ~= 0)
+        nearest_obs = self._find_nearest_obstacle()
 
         # If no obstacle found, use a dummy far away obstacle
         if nearest_obs is None:
@@ -110,9 +138,18 @@ class GameEnv:
         self.y += self.vy * dt
 
         # compute dynamic scroll speed that increases with passed obstacles
-        current_scroll = self.ScrollSpeed * (
-            1.0 + self.passed_count * self.ScrollIncreasePerPass
+        difficulty_multiplier = 1.0 + self.passed_count * self.ScrollIncreasePerPass
+        current_scroll = min(
+            self.ScrollSpeed * difficulty_multiplier,
+            self.MaxScrollSpeed,
         )
+
+        # gentle warmup phase to ease early exploration
+        if self.t < self.WarmupSteps:
+            warmup_ratio = self.t / float(self.WarmupSteps)
+            current_scroll = (
+                self.ScrollSpeed + (current_scroll - self.ScrollSpeed) * warmup_ratio
+            )
 
         # Move all obstacles left by scroll speed
         for obs in self.obstacles:
@@ -135,29 +172,52 @@ class GameEnv:
                     break  # No need to spawn yet
 
             gap_center = self.rng.uniform(150.0, self.ScreenHeight - 150.0)
-            gap_half = self.rng.uniform(80.0, 100.0)  # 增加間隙大小 160-200
+            gap_half = self._sample_gap_half()
             gap_top = gap_center - gap_half
             gap_bottom = gap_center + gap_half
             self.obstacles.append([spawn_x, gap_top, gap_bottom, False])
             break  # Only spawn one per step
 
-        reward = 0.1  # 每步存活獎勵，鼓勵存活更久
+        reward = self.StepPenalty  # 輕微時間懲罰，促使快速通關
         done = False
+        win = False
 
         # 球的半徑（與 UI 中的繪製大小一致）
         ball_radius = 12.0
+        obstacle_width = float(getattr(self, "ObstacleWidth", 40.0))
+        collision_padding = float(getattr(self, "CollisionPadding", 4.0))
+        ball_left = -ball_radius
+        ball_right = ball_radius
 
-        # 碰撞窗口：只有當球心進入障礙物範圍內才檢測碰撞
-        # 原本 collision_window = 14，現在改為 0，表示球心必須與障礙物重疊
-        collision_window = ball_radius  # 球心在障礙物的 x 範圍內
+        # reward shaping：保持在間隙中央並抑制劇烈速度
+        alignment_score = 0.0
+        nearest_obs = self._find_nearest_obstacle()
+        if nearest_obs is not None:
+            gap_top = nearest_obs[1]
+            gap_bottom = nearest_obs[2]
+            gap_center = 0.5 * (gap_top + gap_bottom)
+            gap_half = 0.5 * (gap_bottom - gap_top)
+            distance_from_center = abs(self.y - gap_center)
+            normalized_distance = min(
+                1.0, distance_from_center / (gap_half + ball_radius)
+            )
+            alignment_score = 1.0 - normalized_distance
+            reward += self.AlignmentRewardScale * alignment_score
+
+        reward -= self.VelocityPenaltyScale * (abs(self.vy) / self.MaxAbsVel)
 
         # Check collisions and pass-through events for all obstacles
         for obs in self.obstacles:
             ob_x, gap_top, gap_bottom = obs[0], obs[1], obs[2]
 
             # Detect pass-through event: obstacle crosses player's x ~= 0
-            # Player is at x=0, check if obstacle just passed
-            if not obs[3] and ob_x <= 0 and ob_x > -current_scroll * 2:
+            # Player is at x=0, check if obstacle剛好完全通過
+            obs_right_edge = ob_x + obstacle_width
+            if (
+                not obs[3]
+                and obs_right_edge <= 0
+                and obs_right_edge > -current_scroll * 2
+            ):
                 obs[3] = True  # Mark as passed
                 # Check if ball was in the gap when passing
                 # 使用球體邊緣而不是球心來判斷，與碰撞檢測一致
@@ -168,17 +228,14 @@ class GameEnv:
                     reward += 5.0
                     self.passed_count += 1
 
-            # Check collision: obstacle overlaps with player position (x ~= 0)
-            # 只有當球心完全進入障礙物的 x 範圍內才判定碰撞
-            if -collision_window < ob_x < collision_window:
-                # Check if ball is outside the gap
-                # 球心超出間隙範圍，且球體與障礙物實際接觸
+            # Check collision: obstacle rectangle overlaps with球體
+            horizontally_overlap = (ob_x - collision_padding) < ball_right and (
+                obs_right_edge + collision_padding
+            ) > ball_left
+            if horizontally_overlap:
                 ball_top = self.y - ball_radius
                 ball_bottom = self.y + ball_radius
 
-                # 檢查球體是否與障礙物頂部或底部碰撞
-                # 球的頂部碰到障礙物底部（gap_top 以上的部分）
-                # 或球的底部碰到障礙物頂部（gap_bottom 以下的部分）
                 if ball_top < gap_top or ball_bottom > gap_bottom:
                     reward -= 5.0
                     done = True
@@ -193,30 +250,118 @@ class GameEnv:
         # accumulate episode score
         self.episode_score += float(reward)
 
-        # 檢查勝利條件：達到 99999 分即通關
+        # 檢查勝利條件：達到 WinningScore 分即通關
         if self.episode_score >= self.WinningScore:
             reward += 1000.0  # 給予巨大獎勵
             done = True
-            info = {
-                "episode_score": float(self.episode_score),
-                "win": True,  # 標記為勝利
-            }
-            self.episode_score = 0.0
-            return self._get_state(), float(reward), bool(done), info
+            win = True
 
         self.t += 1
         if self.max_steps is not None and self.t >= self.max_steps:
             done = True
 
         self.done = done
-        info = {"episode_score": float(self.episode_score)}
+        info = {
+            "episode_score": float(self.episode_score),
+            "passed_count": self.passed_count,
+            "scroll_speed": current_scroll,
+            "alignment_score": alignment_score,
+            "win": win,
+            "alive_time": self.t,
+        }
         if done:
-            # reset episode score on done; caller will typically call reset()
-            # but provide final score in info
+            info.setdefault("win", win)
+            info["episode"] = {
+                "r": float(self.episode_score),
+                "l": self.t,
+                "passed": self.passed_count,
+            }
+            # reset episode score on done; caller will call reset()
             self.episode_score = 0.0
         return self._get_state(), float(reward), bool(done), info
 
-    def render(self):
+    def render_frame(
+        self, width: int = 640, height: Optional[int] = None
+    ) -> np.ndarray:
+        """Render a simple RGB array representing the current game state."""
+
+        height = int(height or self.ScreenHeight)
+        width = int(max(width, 320))
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+        # base colors
+        bg_color = np.array([18, 22, 33], dtype=np.uint8)
+        obstacle_color = np.array([80, 110, 165], dtype=np.uint8)
+        gap_glow = np.array([120, 180, 230], dtype=np.uint8)
+        ball_color = np.array([255, 215, 120], dtype=np.uint8)
+        win_color = np.array([140, 220, 120], dtype=np.uint8)
+
+        frame[:] = bg_color
+
+        world_min = -80.0
+        world_max = self.MaxDist + self.ObstacleSpacing * 2.0
+        world_span = max(world_max - world_min, 1.0)
+
+        def world_to_px(x_val: float) -> int:
+            norm = (x_val - world_min) / world_span
+            px = int(norm * width)
+            return int(np.clip(px, 0, width - 1))
+
+        # draw gap glows and obstacles
+        for ob_x, gap_top, gap_bottom, _ in self.obstacles:
+            x0 = world_to_px(ob_x)
+            x1 = world_to_px(ob_x + self.ObstacleWidth)
+            if x1 <= x0:
+                x1 = min(width - 1, x0 + 1)
+
+            top = max(0, int(np.floor(gap_top)))
+            bottom = min(height, int(np.ceil(gap_bottom)))
+
+            if top > 0:
+                frame[0:top, x0:x1] = obstacle_color
+            if bottom < height:
+                frame[bottom:height, x0:x1] = obstacle_color
+
+            # glow inside the gap for readability
+            glow_region = slice(max(top - 4, 0), min(bottom + 4, height))
+            frame[glow_region, x0:x1] = (
+                0.8 * frame[glow_region, x0:x1] + 0.2 * gap_glow
+            ).astype(np.uint8)
+
+        # draw player ball
+        cy = int(np.clip(self.y, 0, height - 1))
+        cx = world_to_px(0.0)
+        radius = int(getattr(self, "ball_radius", 12) or 12)
+        yy, xx = np.ogrid[:height, :width]
+        mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius**2
+        frame[mask] = ball_color
+
+        # progress bar for winning score
+        progress = float(np.clip(self.episode_score / self.WinningScore, 0.0, 1.0))
+        bar_x0, bar_y0 = 20, 20
+        bar_w = width - 40
+        bar_h = 12
+        filled = max(1, int(bar_w * progress))
+        frame[bar_y0 : bar_y0 + bar_h, bar_x0 : bar_x0 + filled] = win_color
+        frame[bar_y0 : bar_y0 + bar_h, bar_x0 + filled : bar_x0 + bar_w] = np.array(
+            [40, 55, 70], dtype=np.uint8
+        )
+
+        # overlay passed obstacle count as tiny ticks
+        tick_count = min(self.passed_count, 50)
+        if tick_count > 0:
+            tick_spacing = bar_w / float(tick_count)
+            for idx in range(tick_count):
+                x = int(bar_x0 + idx * tick_spacing)
+                frame[bar_y0 + bar_h : bar_y0 + bar_h + 4, x : x + 2] = win_color
+
+        return frame
+
+    def render(self, mode: Optional[str] = None):
+        mode = mode or "human"
+        if mode == "rgb_array":
+            return self.render_frame()
+
         # Minimal text render (for smoke testing)
         obs_count = len(self.obstacles)
         nearest_x = min((obs[0] for obs in self.obstacles), default=999.9)

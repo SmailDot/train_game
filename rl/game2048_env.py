@@ -126,21 +126,11 @@ class Game2048Env(gym.Env):
 
         return (obs.astype(np.float32), float(reward), terminated, truncated, info)
 
-    def render(self) -> Optional[np.ndarray]:
-        """
-        渲染環境
+    def render(self, mode: Optional[str] = None) -> Optional[np.ndarray]:
+        """Render using the requested mode (human or rgb_array)."""
 
-        Returns:
-            如果 render_mode 是 "rgb_array"，返回 RGB 圖像
-            否則返回 None
-        """
-        if self.render_mode == "human":
-            # 使用現有的渲染邏輯
-            return self.game.render()
-        elif self.render_mode == "rgb_array":
-            # 返回 RGB 數組 (這裡簡化為 None，實際使用時需要實現)
-            return None
-        return None
+        effective_mode = mode or self.render_mode or "human"
+        return self.game.render(mode=effective_mode)
 
     def close(self):
         """關閉環境"""
@@ -221,7 +211,10 @@ if __name__ == "__main__":
         action = env.action_space.sample()  # 隨機動作
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
-        print(f"步驟 {step + 1}: 獎勵={reward:.1f}, 累計={total_reward:.1f}, 結束={terminated}")
+        print(
+            f"步驟 {step + 1}: 獎勵={reward:.1f}, "
+            f"累計={total_reward:.1f}, 結束={terminated}"
+        )
 
         if terminated:
             print("遊戲結束！")

@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import pygame
 
@@ -29,6 +29,11 @@ try:
 except Exception:
     TD3Trainer = None
 
+try:
+    from agents.sb3_replay_agent import SB3ReplayAgent
+except Exception:
+    SB3ReplayAgent = None
+
 
 class GameUI:
     WIDTH = 1440
@@ -36,7 +41,13 @@ class GameUI:
     BG_COLOR = (30, 30, 40)
     FPS = 60
 
-    def __init__(self, env: Optional[GameEnv] = None, agent: Optional[PPOAgent] = None):
+    def __init__(
+        self,
+        env: Optional[GameEnv] = None,
+        agent: Optional[PPOAgent] = None,
+        *,
+        replay_model_path: Optional[str] = None,
+    ):
         pygame.init()
         self.min_width = 1200
         self.min_height = 720
@@ -51,6 +62,10 @@ class GameUI:
         # environment and agent
         self.env = env or GameEnv()
         self.agent = agent
+        self.replay_agent = None
+        self.replay_model_path = replay_model_path
+        self.replay_status = "idle"
+        self._auto_replay_on_start = False
 
         # start in menu mode; user must choose Human or AI to start a run
         self.mode = "Menu"
@@ -58,43 +73,10 @@ class GameUI:
         self.running = False
         self._last_layout_mode = None  # 追蹤上次佈局計算時的模式
 
-        # fonts and counters - 使用支持中文的字體
-        chinese_fonts = [
-            "microsoftyahei",
-            "microsoftyaheimicrosoftyaheiui",
-            "microsoftyaheiui",
-            "simhei",
-            "simsun",
-            "kaiti",
-            "fangsong",
-            "nsimsun",
-            "msgothic",
-            "mspgothic",
-            "notosanscjk",
-            "notosanscjksc",
-            "arial",
-            "verdana",
-        ]
-
+        # 字體（支援中文）
         self.font = None
         self.large_font = None
-
-        # 嘗試載入中文字體
-        for font_name in chinese_fonts:
-            try:
-                self.font = pygame.font.SysFont(font_name, 28)
-                self.large_font = pygame.font.SysFont(font_name, 36)
-                # 測試是否能正確渲染中文
-                test_surface = self.font.render("測試", True, (255, 255, 255))
-                if test_surface.get_width() > 0:
-                    break
-            except Exception:
-                continue
-
-        # 如果還是沒有找到合適的字體，使用 pygame 默認字體
-        if self.font is None:
-            self.font = pygame.font.Font(None, 28)
-            self.large_font = pygame.font.Font(None, 36)
+        self._init_fonts()
 
         self.ai_manager = AlgorithmManager()
         self.algorithm_hotkeys = {}
@@ -129,6 +111,7 @@ class GameUI:
         self.panel = pygame.Rect(0, 0, 0, 0)
         self.btn_human = pygame.Rect(0, 0, 0, 0)
         self.btn_ai = pygame.Rect(0, 0, 0, 0)
+        self.btn_replay = pygame.Rect(0, 0, 0, 0)
         self.btn_board = pygame.Rect(0, 0, 0, 0)
         self.btn_init = pygame.Rect(0, 0, 0, 0)
         self.btn_speed = pygame.Rect(0, 0, 0, 0)
@@ -171,6 +154,76 @@ class GameUI:
         # surface for small loss plot
         self.loss_surf_size = (self.panel.width - 40, 120)
         self.loss_surf = pygame.Surface(self.loss_surf_size)
+
+    def _init_fonts(self) -> None:
+        """嘗試載入支援中文的字體，確保 UI 正確顯示。"""
+
+        def _font_can_render(font_obj) -> bool:
+            try:
+                surface = font_obj.render("繁體中文測試", True, (255, 255, 255))
+                return surface.get_width() > 0
+            except Exception:
+                return False
+
+        preferred_names = [
+            "microsoft yahei",
+            "microsoft yahei ui",
+            "simhei",
+            "ms gothic",
+            "ms pgothic",
+            "notosanscjk",
+            "notosans tc",
+            "arial unicode ms",
+        ]
+
+        custom_path = os.getenv("TRAIN_GAME_FONT")
+        font_paths = [custom_path] if custom_path else []
+
+        windows_font_dir = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts")
+        font_paths.extend(
+            [
+                os.path.join(windows_font_dir, "msyh.ttc"),
+                os.path.join(windows_font_dir, "msyhbd.ttc"),
+                os.path.join(windows_font_dir, "msjh.ttc"),
+                os.path.join(windows_font_dir, "simhei.ttf"),
+                os.path.join(windows_font_dir, "mingliu.ttc"),
+            ]
+        )
+
+        project_font = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts")
+        project_font = os.path.abspath(project_font)
+        if os.path.isdir(project_font):
+            for name in os.listdir(project_font):
+                if name.lower().endswith((".ttf", ".ttc", ".otf")):
+                    font_paths.append(os.path.join(project_font, name))
+
+        for font_name in preferred_names:
+            try:
+                font_obj = pygame.font.SysFont(font_name, 28)
+                large_obj = pygame.font.SysFont(font_name, 36)
+                if _font_can_render(font_obj):
+                    self.font = font_obj
+                    self.large_font = large_obj
+                    return
+            except Exception:
+                continue
+
+        for font_path in font_paths:
+            if not font_path or not os.path.exists(font_path):
+                continue
+            try:
+                font_obj = pygame.font.Font(font_path, 28)
+                large_obj = pygame.font.Font(font_path, 36)
+                if _font_can_render(font_obj):
+                    self.font = font_obj
+                    self.large_font = large_obj
+                    return
+            except Exception:
+                continue
+
+        # Fallback：仍無法載入中文，使用默認字型
+        self.font = pygame.font.Font(None, 28)
+        self.large_font = pygame.font.Font(None, 36)
 
     def _register_algorithms(self) -> None:
         # 檢查 GPU 可用性
@@ -609,6 +662,8 @@ class GameUI:
         top += btn_height + spacing
         self.btn_ai = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
+        self.btn_replay = pygame.Rect(left, top, btn_width, btn_height)
+        top += btn_height + spacing
         self.btn_board = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
         self.btn_multi_view = pygame.Rect(left, top, btn_width, btn_height)
@@ -968,6 +1023,7 @@ class GameUI:
         button_specs = [
             (self.btn_human, "人類遊玩", self.large_font, (70, 70, 80)),
             (self.btn_ai, "AI 訓練", self.large_font, (70, 70, 80)),
+            (self.btn_replay, "SB3 Replay", self.large_font, (60, 80, 110)),
             (self.btn_board, "排行榜", self.large_font, (70, 70, 80)),
             (self.btn_multi_view, "多視窗觀看", self.font, (80, 70, 120)),
             (self.btn_init, "初始化訓練", self.font, (70, 70, 80)),
@@ -1018,7 +1074,13 @@ class GameUI:
 
         # mode indicator & current score - 使用更大的間距
         info_y = hint_y + hint_surface.get_height() + 20
-        mode_map = {"Human": "人類", "AI": "AI 訓練", "Menu": "選單", "Board": "排行榜"}
+        mode_map = {
+            "Human": "人類",
+            "AI": "AI 訓練",
+            "Replay": "SB3 Replay",
+            "Menu": "選單",
+            "Board": "排行榜",
+        }
         mode_name = mode_map.get(self.mode, str(self.mode))
         mode_text = self.large_font.render("模式", True, (150, 150, 160))
         mode_value = self.large_font.render(mode_name, True, (220, 220, 230))
@@ -1067,7 +1129,6 @@ class GameUI:
                     f"演算法: {slot.descriptor.name}", True, (200, 200, 230)
                 )
                 self.screen.blit(algo_label, (self.panel.left + 20, ai_info_y + 52))
-                # info_y_cursor initialized below; don't increment before it's defined
 
             line_height = 32  # 增加行高以避免重疊
             info_y_cursor = ai_info_y + 65
@@ -1078,13 +1139,7 @@ class GameUI:
                 ("PPO 更新次數", "it", "{:,.0f}", (210, 220, 255), ""),
                 ("累積訓練回合", "episode_count", "{:,.0f}", (200, 255, 200), ""),
                 ("最近平均回報", "mean_reward", "{:.2f}", (255, 240, 180), ""),
-                (
-                    "Policy Loss",
-                    "policy_loss",
-                    "{:.4f}",
-                    (200, 80, 80),
-                    " (越低越好)",
-                ),
+                ("Policy Loss", "policy_loss", "{:.4f}", (200, 80, 80), " (越低越好)"),
                 ("Value Loss", "value_loss", "{:.4f}", (80, 200, 120), " (越低越好)"),
                 (
                     "Entropy",
@@ -1118,13 +1173,11 @@ class GameUI:
                 self.screen.blit(action, (self.panel.left + 20, info_y_cursor))
                 info_y_cursor += line_height
 
-                # 顯示動作機率
                 prob_text = f"信心: {self.last_ai_action_prob:.1%}"
                 prob = self.font.render(prob_text, True, (200, 200, 200))
                 self.screen.blit(prob, (self.panel.left + 20, info_y_cursor))
                 info_y_cursor += line_height
 
-                # 顯示狀態價值估計
                 value_text = f"價值: {self.last_ai_value:.2f}"
                 value_color = (
                     (100, 255, 100) if self.last_ai_value > 0 else (255, 100, 100)
@@ -1134,6 +1187,24 @@ class GameUI:
                 info_y_cursor += line_height
 
             ai_info_bottom = info_y_cursor
+        elif self.mode == "Replay" and self.running:
+            replay_y = score_y + 92
+            replay_title = self.font.render("SB3 Replay", True, (150, 200, 255))
+            self.screen.blit(replay_title, (self.panel.left + 20, replay_y))
+            status_surface = self.font.render(
+                f"狀態: {self.replay_status}", True, (200, 220, 255)
+            )
+            self.screen.blit(status_surface, (self.panel.left + 20, replay_y + 30))
+            model_path = self.replay_model_path or "auto"
+            model_surface = self.font.render(
+                f"模型: {os.path.basename(model_path)}",
+                True,
+                (200, 200, 210),
+            )
+            self.screen.blit(model_surface, (self.panel.left + 20, replay_y + 60))
+            ai_info_bottom = replay_y + 110
+        else:
+            ai_info_bottom = score_y + 70
 
         # leaderboard - 簡潔顯示（只在非 AI 訓練模式下顯示）
         lb_bottom = score_y + 120  # 預設位置
@@ -1165,10 +1236,7 @@ class GameUI:
 
             lb_bottom = lb_top + 40 + lb_entries * 28
         elif self.mode == "AI" and self.running:
-            # AI 訓練模式下，lb_bottom 使用 AI 信息的底部位置
-            lb_bottom = (
-                ai_info_bottom if "ai_info_bottom" in locals() else score_y + 120
-            )
+            lb_bottom = ai_info_bottom
 
         plot_w, plot_h = self.loss_surf_size
         plot_x = self.panel.left + 20
@@ -1372,6 +1440,70 @@ class GameUI:
         self._ai_init_thread = threading.Thread(target=_worker, daemon=True)
         self._ai_init_thread.start()
 
+    def enable_auto_replay(self) -> None:
+        """Set a flag so run() starts in Replay mode automatically."""
+        self._auto_replay_on_start = True
+
+    def _resolve_replay_model_path(self) -> Optional[str]:
+        candidates = []
+        if self.replay_model_path:
+            candidates.append(self.replay_model_path)
+        candidates.extend(
+            [
+                os.path.join("models", "ppo_game2048_6666_final.zip"),
+                os.path.join("best_model", "best_model.zip"),
+            ]
+        )
+        for path in candidates:
+            if path and os.path.exists(path):
+                return os.path.abspath(path)
+        return None
+
+    def _start_replay_mode(
+        self,
+        *,
+        auto_trigger: bool = False,
+        initial_state=None,
+    ) -> Optional[Any]:
+        if SB3ReplayAgent is None:
+            print("⚠️ 未安裝 stable-baselines3，無法進入 Replay 模式。")
+            self.replay_status = "missing"
+            return None
+
+        model_path = self._resolve_replay_model_path()
+        if model_path is None:
+            print("⚠️ 找不到 SB3 模型，請使用 --replay-model 指定檔案。")
+            self.replay_status = "missing"
+            return None
+
+        try:
+            self.replay_agent = SB3ReplayAgent(model_path)
+            self.replay_model_path = model_path
+            self.replay_status = "loaded"
+        except Exception as exc:
+            print(f"❌ 無法載入 SB3 模型: {exc}")
+            self.replay_agent = None
+            self.replay_status = "error"
+            return None
+
+        if not auto_trigger:
+            print(f"🎬 SB3 Replay 模式啟動，模型: {model_path}")
+
+        self.mode = "Replay"
+        self.selected_mode = "Replay"
+        self.running = True
+        self.game_over = False
+        self.paused = False
+        self.current_score = 0.0
+        self.last_ai_action = None
+        self.last_ai_action_prob = 0.0
+        self.last_ai_value = 0.0
+
+        self._update_layout(self.width, self.height)
+
+        state = initial_state if initial_state is not None else self.env.reset()
+        return state
+
     def _launch_multi_window_view(self):
         """啟動多視窗觀看模式"""
         import subprocess
@@ -1503,6 +1635,8 @@ class GameUI:
             self.training_dialog = TrainingDialog(self.width, self.height)
             self.show_training_dialog = True
             return None
+        if not self.running and self.btn_replay.collidepoint(pos):
+            return self._start_replay_mode()
         if self.btn_board.collidepoint(pos):
             if self.mode == "Board":
                 self.mode = "Menu"
@@ -2045,6 +2179,11 @@ class GameUI:
 
     def run(self):
         s = self.env.reset()
+        if self._auto_replay_on_start:
+            pending_state = self._start_replay_mode(auto_trigger=True, initial_state=s)
+            if pending_state is not None:
+                s = pending_state
+            self._auto_replay_on_start = False
         running = True
         while running:
             for event in pygame.event.get():
@@ -2118,32 +2257,47 @@ class GameUI:
                 continue
 
             steps_this_frame = 1
-            if self.mode == "AI":
+            if self.mode in ("AI", "Replay"):
                 steps_this_frame = max(1, int(self.ai_speed_multiplier))
 
+            info = {}
             for _ in range(steps_this_frame):
                 if self.mode == "AI":
                     if self.agent is not None:
                         a, logp, value = self.agent.act(s)
-                        next_s, r, done, info = self.env.step(a)
+                        next_s, r, done, step_info = self.env.step(a)
 
                         self.last_ai_action = a
                         prob = math.exp(logp) if logp > -10 else 0.0
                         self.last_ai_action_prob = max(0.0, min(1.0, prob))
                         self.last_ai_value = value
                         s = next_s
+                        info = step_info
                     else:
                         self.last_ai_action = None
                         self.last_ai_action_prob = 0.0
                         self.last_ai_value = 0.0
-                        s, r, done, _ = self.env.step(0)
+                        s, r, done, step_info = self.env.step(0)
+                        info = step_info
+                elif self.mode == "Replay":
+                    if self.replay_agent is not None:
+                        a, logp, value = self.replay_agent.act(s)
+                    else:
+                        a, logp, value = 0, 0.0, 0.0
+                    next_s, r, done, step_info = self.env.step(a)
+                    self.last_ai_action = a
+                    self.last_ai_action_prob = 0.0
+                    self.last_ai_value = value
+                    s = next_s
+                    info = step_info
                 else:
                     if self.human_jump:
                         action = 1
                         self.human_jump = False
                     else:
                         action = 0
-                    s, r, done, _ = self.env.step(action)
+                    s, r, done, step_info = self.env.step(action)
+                    info = step_info
 
                 try:
                     self.current_score += float(r)
@@ -2168,6 +2322,33 @@ class GameUI:
                         }
                     )
                     self.leaderboard = sorted(
+                        self.leaderboard, key=lambda x: x.get("score", 0), reverse=True
+                    )[:50]
+                    try:
+                        self._save_scores()
+                    except Exception:
+                        pass
+                elif self.mode == "Replay":
+                    self.game_over = True
+                    score = int(self.current_score)
+                    model_note = self.replay_model_path or ""
+                    model_label = (
+                        os.path.basename(model_note) if model_note else "SB3 模型"
+                    )
+                    note_text = f"SB3 模型 {model_label}" if model_note else model_label
+                    if is_win:
+                        note_text = "🎉 通關！ " + note_text
+
+                    self.leaderboard.append(
+                        {
+                            "name": "SB3-Replay",
+                            "score": score,
+                            "iteration": None,
+                            "note": note_text,
+                        }
+                    )
+                    self.replay_status = "finished"
+                    self.leaderboard = sorted(
                         self.leaderboard, key=lambda x: x["score"], reverse=True
                     )[:50]
                     try:
@@ -2181,8 +2362,6 @@ class GameUI:
                     score = int(self.current_score)
                     iteration_idx = int(self.training_iterations)
 
-                    # 檢查是否勝利
-                    is_win = info.get("win", False)
                     if is_win:
                         note_text = f"🎉 通關！{algo_name} 第{iteration_idx:,}次訓練"
                     else:
@@ -2214,20 +2393,18 @@ class GameUI:
                             try:
                                 with open(history_file, "r", encoding="utf-8") as f:
                                     history = json.load(f)
-                            except:
+                            except (OSError, json.JSONDecodeError):
                                 history = []
 
-                        # 添加當前記錄
                         history.append(
                             {
                                 "name": name,
                                 "score": score,
                                 "iteration": iteration_idx,
-                                "timestamp": None,  # 可以添加時間戳
+                                "timestamp": None,
                             }
                         )
 
-                        # 只保留最近 1000 條（避免文件過大）
                         history = sorted(
                             history, key=lambda x: x["iteration"], reverse=True
                         )[:1000]
@@ -2235,9 +2412,8 @@ class GameUI:
                         with open(history_file, "w", encoding="utf-8") as f:
                             json.dump(history, f, ensure_ascii=False, indent=2)
                     except Exception:
-                        pass  # 不中斷主流程
+                        pass
 
-                    # 檢查是否打破歷史記錄，立即更新 checkpoint_best.pt
                     try:
                         self._check_and_update_best_checkpoint(score, iteration_idx)
                     except Exception:
@@ -2250,16 +2426,8 @@ class GameUI:
                         f"(第{iteration_idx:,}次訓練)"
                     )
 
-                    self.screen.fill(self.BG_COLOR)
-                    # AI 模式下不顯示演算法面板
-                    self.draw_playfield(s)
-                    self.draw_panel()
-                    pygame.display.flip()
-                    pygame.time.wait(300)
-
-                    self.current_score = 0.0
                     self.viewer_round += 1
-                    s = self.env.reset()
+                    self.game_over = True
 
                 break
 

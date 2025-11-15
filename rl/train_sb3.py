@@ -8,14 +8,12 @@ Game2048 SB3 訓練腳本
 import argparse
 import os
 import sys
+from argparse import BooleanOptionalAction
+from collections import deque
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
-
-# 添加項目根目錄到路徑
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import (
@@ -27,7 +25,28 @@ from stable_baselines3.common.callbacks import (
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecMonitor, VecNormalize
 
-from rl.game2048_env import Game2048Env
+# 添加項目根目錄到路徑
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+
+def _import_env():
+    from rl.game2048_env import Game2048Env as _Game2048Env
+
+    return _Game2048Env
+
+
+Game2048Env = _import_env()
+
+
+def make_linear_schedule(start: float, end: float):
+    """Create a linear schedule callable compatible with SB3."""
+
+    def schedule(progress_remaining: float) -> float:
+        return end + (start - end) * progress_remaining
+
+    return schedule
 
 
 class WinCallback(BaseCallback):
@@ -58,7 +77,113 @@ class WinCallback(BaseCallback):
         return True
 
 
-def create_envs(n_envs: int = 32, normalize: bool = True):
+class EpisodeStatsCallback(BaseCallback):
+    """Record custom environment metrics (e.g., passes, scroll speed)."""
+
+    def __init__(self, prefix: str = "env", verbose: int = 0):
+        super().__init__(verbose)
+        self.prefix = prefix
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos") if hasattr(self, "locals") else None
+        if not infos:
+            return True
+
+        metrics = {}
+        for info in infos:
+            if not isinstance(info, dict):
+                continue
+            for key in ("passed_count", "scroll_speed", "alignment_score"):
+                if key in info:
+                    metrics.setdefault(key, []).append(info[key])
+
+            # Track binary win flags to compute win rate during training
+            if "win" in info:
+                metrics.setdefault("win", []).append(float(bool(info["win"])))
+
+        for key, values in metrics.items():
+            if not values:
+                continue
+
+            if key == "win":
+                self.logger.record(f"{self.prefix}/win_rate", float(np.mean(values)))
+            else:
+                self.logger.record(f"{self.prefix}/{key}", float(np.mean(values)))
+
+        return True
+
+
+class AdaptiveEntropyCallback(BaseCallback):
+    """Dynamically adjust entropy coefficient based on recent win rate."""
+
+    def __init__(
+        self,
+        window_size: int = 4096,
+        low_threshold: float = 0.05,
+        high_threshold: float = 0.25,
+        increase_step: float = 5e-4,
+        decrease_step: float = 3e-4,
+        min_ent: float = 0.004,
+        max_ent: float = 0.012,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.window_size = window_size
+        self.low_threshold = low_threshold
+        self.high_threshold = high_threshold
+        self.increase_step = increase_step
+        self.decrease_step = decrease_step
+        self.min_ent = min_ent
+        self.max_ent = max_ent
+        self._buffer: deque[float] = deque(maxlen=window_size)
+        self._current_ent: Optional[float] = None
+
+    def _on_training_start(self) -> None:
+        # Capture the initial entropy coefficient from the model
+        self._current_ent = float(getattr(self.model, "ent_coef", 0.01))
+        if self.verbose:
+            print(f"🔧 自適應熵啟動，初始 ent_coef = {self._current_ent:.5f}")
+
+    def _set_entropy(self, value: float) -> None:
+        if self._current_ent is None or abs(value - self._current_ent) < 1e-6:
+            return
+
+        self._current_ent = float(np.clip(value, self.min_ent, self.max_ent))
+        self.model.ent_coef = self._current_ent
+        # Log to TensorBoard for transparency
+        self.logger.record("train/entropy_coef", self._current_ent)
+        if self.verbose:
+            print(f"⚙️ 調整 ent_coef -> {self._current_ent:.5f}")
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos") if hasattr(self, "locals") else None
+        if not infos:
+            return True
+
+        win_flag = 1.0 if any(info.get("win", False) for info in infos) else 0.0
+        self._buffer.append(win_flag)
+
+        if len(self._buffer) < self.window_size:
+            return True
+
+        win_rate = float(np.mean(self._buffer))
+
+        if win_rate >= self.high_threshold:
+            self._set_entropy(self._current_ent - self.decrease_step)
+        elif win_rate <= self.low_threshold:
+            self._set_entropy(self._current_ent + self.increase_step)
+
+        return True
+
+
+def create_envs(
+    n_envs: int = 32,
+    normalize: bool = True,
+    training: bool = True,
+    norm_path: Optional[str] = None,
+    seed: int = 42,
+    render_mode: Optional[str] = None,
+):
     """
     創建向量化環境
 
@@ -71,8 +196,11 @@ def create_envs(n_envs: int = 32, normalize: bool = True):
     """
     print(f"🚀 創建 {n_envs} 個並行環境...")
 
-    # 創建基礎環境
-    vec_env = make_vec_env(Game2048Env, n_envs=n_envs, env_kwargs={}, seed=42)
+    env_kwargs = {}
+    if render_mode:
+        env_kwargs["render_mode"] = render_mode
+
+    vec_env = make_vec_env(Game2048Env, n_envs=n_envs, env_kwargs=env_kwargs, seed=seed)
 
     # 添加監控
     log_dir = "./logs/"
@@ -81,32 +209,43 @@ def create_envs(n_envs: int = 32, normalize: bool = True):
 
     # 可選：添加正規化
     if normalize:
-        vec_env = VecNormalize(
-            vec_env,
-            norm_obs=True,
-            norm_reward=True,
-            clip_obs=10.0,
-            clip_reward=10.0,
-            gamma=0.995,
-        )
+        norm_reward = training
+        if norm_path and os.path.exists(norm_path):
+            vec_env = VecNormalize.load(norm_path, vec_env)
+            print(f"📄 VecNormalize 統計載入: {norm_path}")
+        else:
+            if norm_path and not os.path.exists(norm_path):
+                print(f"⚠️ 找不到 VecNormalize 檔案 {norm_path}，將重新初始化統計。")
+            vec_env = VecNormalize(
+                vec_env,
+                norm_obs=True,
+                norm_reward=norm_reward,
+                clip_obs=10.0,
+                clip_reward=10.0,
+                gamma=0.995,
+            )
+
+        vec_env.training = training
+        vec_env.norm_reward = norm_reward
+
+    if render_mode:
+        setattr(vec_env, "render_mode", render_mode)
 
     return vec_env
 
 
-def create_callbacks(eval_freq: int = 5000, save_freq: int = 10000):
-    """
-    創建訓練回調
+def create_callbacks(
+    env,
+    normalize: bool = False,
+    eval_freq: int = 5000,
+    save_freq: int = 10000,
+    norm_path: Optional[str] = None,
+    seed: int = 42,
+):
+    """建立訓練/評估所需的回調。"""
 
-    Args:
-        eval_freq: 評估頻率
-        save_freq: 保存頻率
-
-    Returns:
-        回調列表
-    """
     callbacks = []
 
-    # 檢查點回調
     checkpoint_callback = CheckpointCallback(
         save_freq=save_freq,
         save_path="./checkpoints/",
@@ -116,8 +255,25 @@ def create_callbacks(eval_freq: int = 5000, save_freq: int = 10000):
     )
     callbacks.append(checkpoint_callback)
 
-    # 評估回調
-    eval_env = make_vec_env(Game2048Env, n_envs=4)
+    eval_env = create_envs(
+        n_envs=4,
+        normalize=normalize,
+        training=False,
+        norm_path=norm_path,
+        seed=seed + 1,
+        render_mode=None,
+    )
+
+    if (
+        normalize
+        and isinstance(env, VecNormalize)
+        and isinstance(eval_env, VecNormalize)
+    ):
+        eval_env.obs_rms = env.obs_rms.copy()
+        eval_env.ret_rms = env.ret_rms.copy()
+        eval_env.training = False
+        eval_env.norm_reward = False
+
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path="./best_model/",
@@ -129,9 +285,9 @@ def create_callbacks(eval_freq: int = 5000, save_freq: int = 10000):
     )
     callbacks.append(eval_callback)
 
-    # 通關監控回調
-    win_callback = WinCallback(verbose=1)
-    callbacks.append(win_callback)
+    callbacks.append(WinCallback(verbose=1))
+    callbacks.append(EpisodeStatsCallback(verbose=0))
+    callbacks.append(AdaptiveEntropyCallback(verbose=0))
 
     return CallbackList(callbacks)
 
@@ -148,6 +304,10 @@ def create_model(env, config: dict):
         PPO 模型
     """
     print("🧠 創建 PPO 模型...")
+
+    learning_rate = config["learning_rate"]
+    if isinstance(learning_rate, (tuple, list)) and len(learning_rate) == 2:
+        learning_rate = make_linear_schedule(learning_rate[0], learning_rate[1])
 
     # 網絡架構配置
     policy_kwargs = dict(
@@ -172,7 +332,7 @@ def create_model(env, config: dict):
         env,
         policy_kwargs=policy_kwargs,
         # 學習參數
-        learning_rate=config["learning_rate"],
+        learning_rate=learning_rate,
         gamma=config["gamma"],
         gae_lambda=config["gae_lambda"],
         # PPO 參數
@@ -209,18 +369,18 @@ def get_training_config(target: str = "6666") -> dict:
         # 網絡架構
         "hidden_dim": 256,
         # 學習參數 (針對長期目標優化)
-        "learning_rate": 5e-5,  # 穩定但不太慢
-        "gamma": 0.995,  # 高折扣因子（重視長期獎勵）
-        "gae_lambda": 0.97,  # 高 GAE lambda
+        "learning_rate": 1e-4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
         # PPO 參數
-        "clip_range": 0.15,  # 適中的 clip 範圍
-        "ent_coef": 0.05,  # 高 entropy（探索）
-        "vf_coef": 1.5,  # 強 critic 訓練
+        "clip_range": 0.1,
+        "ent_coef": 0.005,
+        "vf_coef": 1.0,
         # 訓練效率
-        "n_steps": 2048,  # 每個環境收集 2048 步
-        "batch_size": 512,  # 大 batch size
-        "n_epochs": 15,  # 每次更新 15 輪
-        "max_grad_norm": 0.5,
+        "n_steps": 1024,
+        "batch_size": 2048,
+        "n_epochs": 10,
+        "max_grad_norm": 0.3,
         # 日誌
         "verbose": 1,
         "tensorboard_log": "./logs/tensorboard/",
@@ -231,12 +391,12 @@ def get_training_config(target: str = "6666") -> dict:
         config_6666 = base_config.copy()
         config_6666.update(
             {
-                "learning_rate": 3e-5,  # 更慢但更穩定
-                "ent_coef": 0.03,  # 稍微減少探索
-                "vf_coef": 2.0,  # 更強的 critic
-                "n_steps": 4096,  # 收集更多數據
-                "batch_size": 1024,  # 更大的 batch
-                "n_epochs": 20,  # 更多更新輪次
+                "learning_rate": (1e-4, 5e-5),
+                "ent_coef": 0.01,
+                "vf_coef": 1.5,
+                "n_steps": 1536,
+                "batch_size": 2048,
+                "n_epochs": 12,
             }
         )
         return config_6666
@@ -246,12 +406,12 @@ def get_training_config(target: str = "6666") -> dict:
         config_test = base_config.copy()
         config_test.update(
             {
-                "learning_rate": 1e-4,  # 更快學習
-                "ent_coef": 0.1,  # 更多探索
-                "n_steps": 1024,  # 少量數據
-                "batch_size": 256,  # 小 batch
-                "n_epochs": 5,  # 少量更新
-                "verbose": 2,  # 更多輸出
+                "learning_rate": 2e-4,
+                "ent_coef": 0.02,
+                "n_steps": 512,
+                "batch_size": 512,
+                "n_epochs": 6,
+                "verbose": 2,
             }
         )
         return config_test
@@ -269,7 +429,29 @@ def main():
     parser.add_argument(
         "--target", type=str, default="6666", choices=["6666", "test"], help="訓練目標"
     )
-    parser.add_argument("--normalize", action="store_true", help="使用 VecNormalize")
+    parser.add_argument(
+        "--normalize",
+        action=BooleanOptionalAction,
+        default=True,
+        help="啟用或停用 VecNormalize (預設啟用)",
+    )
+    parser.add_argument(
+        "--norm-path",
+        type=str,
+        help="VecNormalize 統計檔案路徑（可用於載入/覆寫）",
+    )
+    parser.add_argument(
+        "--eval-freq",
+        type=int,
+        default=50_000,
+        help="評估頻率（以 timesteps 為單位）",
+    )
+    parser.add_argument(
+        "--save-freq",
+        type=int,
+        default=25_000,
+        help="檢查點保存頻率",
+    )
     parser.add_argument("--load", type=str, help="載入現有模型路徑")
     parser.add_argument("--seed", type=int, default=42, help="隨機種子")
 
@@ -287,11 +469,22 @@ def main():
     print(f"🖥️ 設備: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
     print("=" * 60)
 
+    if not args.normalize and args.norm_path:
+        print("⚠️ 已停用 VecNormalize，忽略 --norm-path 參數。")
+
     # 創建環境
-    env = create_envs(args.n_envs, args.normalize)
+    env = create_envs(
+        args.n_envs,
+        normalize=args.normalize,
+        training=True,
+        norm_path=args.norm_path,
+        seed=args.seed,
+    )
 
     # 獲取配置
     config = get_training_config(args.target)
+
+    norm_save_path = args.norm_path or f"./models/vec_normalize_{args.target}.pkl"
 
     # 創建或載入模型
     if args.load:
@@ -301,7 +494,14 @@ def main():
         model = create_model(env, config)
 
     # 創建回調
-    callbacks = create_callbacks()
+    callbacks = create_callbacks(
+        env,
+        normalize=args.normalize,
+        eval_freq=args.eval_freq,
+        save_freq=args.save_freq,
+        norm_path=args.norm_path,
+        seed=args.seed,
+    )
 
     # 開始訓練！
     print("🎯 開始訓練...")
@@ -322,9 +522,8 @@ def main():
 
         # 如果使用 VecNormalize，保存正規化統計
         if args.normalize and hasattr(env, "save"):
-            norm_path = f"./models/vec_normalize_{args.target}.pkl"
-            env.save(norm_path)
-            print(f"✅ VecNormalize 統計已保存到: {norm_path}")
+            env.save(norm_save_path)
+            print(f"✅ VecNormalize 統計已保存到: {norm_save_path}")
 
     except KeyboardInterrupt:
         print("\n⚠️ 訓練被中斷")
@@ -333,6 +532,9 @@ def main():
         os.makedirs(os.path.dirname(interrupt_path), exist_ok=True)
         model.save(interrupt_path)
         print(f"💾 中間結果已保存到: {interrupt_path}")
+        if args.normalize and hasattr(env, "save"):
+            env.save(norm_save_path)
+            print(f"💾 VecNormalize 統計已保存到: {norm_save_path}")
 
     finally:
         env.close()

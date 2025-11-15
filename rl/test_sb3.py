@@ -11,19 +11,27 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
-# 添加項目根目錄到路徑
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+import pytest
 import torch
 from stable_baselines3 import PPO
 
-from rl.game2048_env import Game2048Env
+# 添加項目根目錄到路徑
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+
+def _import_env():
+    from rl.game2048_env import Game2048Env as _Game2048Env
+
+    return _Game2048Env
+
+
+Game2048Env = _import_env()
 
 
 def test_model(
-    model_path: str,
+    model_path: str = None,
     n_episodes: int = 10,
     render: bool = False,
     deterministic: bool = True,
@@ -39,6 +47,15 @@ def test_model(
         deterministic: 是否使用確定性策略
         seed: 隨機種子
     """
+    default_model_path = Path("best_model") / "best_model.zip"
+    if model_path is None:
+        if default_model_path.exists():
+            model_path = str(default_model_path)
+        else:
+            pytest.skip(
+                "未提供 model_path，且 best_model/best_model.zip 不存在；僅供手動測試"
+            )
+
     print(f"🧪 測試模型: {model_path}")
     print(f"🎮 測試回合: {n_episodes}")
     print(f"🎯 確定性: {deterministic}")
@@ -172,8 +189,11 @@ def compare_models(model_paths: list, n_episodes: int = 5):
 
         for path, result in results.items():
             name = Path(path).name
-            win_rate_pct = result['win_rate'] * 100
-            print(f"{name:<15} {result['avg_score']:<8.1f} {result['max_score']:<6.0f} {win_rate_pct:<8.1f}%")
+            win_rate_pct = result["win_rate"] * 100
+            print(
+                f"{name:<15} {result['avg_score']:<8.1f} "
+                f"{result['max_score']:<6.0f} {win_rate_pct:<8.1f}%"
+            )
 
     return results
 
