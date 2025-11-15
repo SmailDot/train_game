@@ -56,7 +56,7 @@ try:
             self.batch_size = batch_size
             self.ppo_epochs = ppo_epochs
 
-            self.opt = torch.optim.Adam(self.net.parameters(), lr=lr, weight_decay=1e-4)
+            self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
 
             # 配置文件路徑
             self.config_path = Path(__file__).parent.parent / "training_config.json"
@@ -266,7 +266,7 @@ try:
             # 讀取 scores.json 獲取真實遊戲表現
             scores_file = os.path.join(self.save_dir, "scores.json")
             history_file = os.path.join(self.save_dir, "training_history.json")
-
+            
             # 優先使用完整歷史文件（避免排行榜截斷問題）
             if os.path.exists(history_file):
                 try:
@@ -298,11 +298,11 @@ try:
                 recent_10_scores = [
                     entry.get("score", 0) for entry in scores_by_iteration[:10]
                 ]
-
+                
                 if len(recent_10_scores) >= 10:
                     recent_10_mean = np.mean(recent_10_scores)
                     recent_10_max = np.max(recent_10_scores)
-
+                    
                     # 極端崩潰：最近 10 局全部很差
                     if recent_10_max < 200:  # 最高分都不到 200
                         print(f"\n{'='*60}")
@@ -312,7 +312,7 @@ try:
                         print(f"   最近10局平均: {recent_10_mean:.1f}")
                         print(f"   分數分布: {[int(s) for s in recent_10_scores]}")
                         print("\n🔄 立即回檔...")
-
+                        
                         success = self._rollback_to_best_checkpoint()
                         if success:
                             print("✅ 成功回檔！")
@@ -324,17 +324,15 @@ try:
                     recent_20_scores = [
                         entry.get("score", 0) for entry in scores_by_iteration[:20]
                     ]
-
+                    
                     # 簡單線性趨勢檢測（前半 vs 後半）
                     # 注意：scores_by_iteration[:10] 是最近 10 局
                     #      scores_by_iteration[10:20] 是之前 10 局
-                    recent_10 = np.mean(recent_20_scores[:10])  # 最近 10 局
+                    recent_10 = np.mean(recent_20_scores[:10])   # 最近 10 局
                     previous_10 = np.mean(recent_20_scores[10:20])  # 之前 10 局
-
+                    
                     # 如果最近 10 局明顯比之前 10 局差
-                    if (
-                        previous_10 > 0 and recent_10 / previous_10 < 0.67
-                    ):  # 下降超過 33%
+                    if previous_10 > 0 and recent_10 / previous_10 < 0.67:  # 下降超過 33%
                         trend_drop = (previous_10 - recent_10) / previous_10
                         print(f"\n⚠️ 警告：檢測到下降趨勢！")
                         print(f"   最近10局平均: {recent_10:.1f}")
@@ -344,8 +342,7 @@ try:
                 # === 3. 深度檢測（最近 50 局）===
                 recent_window = min(50, len(scores_by_iteration))
                 recent_scores = [
-                    entry.get("score", 0)
-                    for entry in scores_by_iteration[:recent_window]
+                    entry.get("score", 0) for entry in scores_by_iteration[:recent_window]
                 ]
 
                 if len(recent_scores) < 10:
@@ -381,22 +378,18 @@ try:
                 # 輕度警告（不回檔，只提示）
                 if mean_drop > 0.30 and mean_drop <= 0.50:
                     print(f"\n⚠️ 輕度警告：平均分下降 {mean_drop*100:.1f}%")
-                    print(
-                        f"   當前平均: {recent_mean:.1f} (歷史: {historical_mean:.1f})"
-                    )
-
+                    print(f"   當前平均: {recent_mean:.1f} (歷史: {historical_mean:.1f})")
+                
                 # 中度警告（不回檔，但提示注意）
                 elif mean_drop > 0.50 and mean_drop <= 0.65:
                     print(f"\n🟡 中度警告：平均分下降 {mean_drop*100:.1f}%！")
-                    print(
-                        f"   當前平均: {recent_mean:.1f} (歷史: {historical_mean:.1f})"
-                    )
+                    print(f"   當前平均: {recent_mean:.1f} (歷史: {historical_mean:.1f})")
                     print(f"   建議：觀察下幾輪，可能需要回檔")
 
                 # === 5. 嚴格崩潰條件（優化版）===
                 # 條件放寬，但更實用：
                 # 1. 平均分下降 > 60% (從 70% 降低)
-                # 2. 且最近最高分也下降 > 50% (從 60% 降低)
+                # 2. 且最近最高分也下降 > 50% (從 60% 降低)  
                 # 3. 且最近平均分 < 500 (從 300 提高，更實用)
                 is_catastrophic = (
                     mean_drop > 0.60 and max_drop > 0.50 and recent_mean < 500
@@ -417,7 +410,8 @@ try:
                     )
                     print(f"   最近{recent_window}局最低: {recent_min:.0f}")
                     print(
-                        f"\n📊 最近分數分布: " f"{[int(s) for s in recent_scores[:10]]}"
+                        f"\n📊 最近分數分布: "
+                        f"{[int(s) for s in recent_scores[:10]]}"
                     )
                     print("\n🔄 正在回檔到最佳檢查點...")
 

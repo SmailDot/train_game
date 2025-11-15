@@ -11,13 +11,13 @@ RTX_3060TI_CONFIG = {
     "device": "cuda",  # 使用 GPU
     "batch_size": 256,  # 增大 batch size 利用 GPU
     "ppo_epochs": 10,  # 增加 PPO 更新次數
-    "lr": 1e-4,  # 降低 from 2.5e-4 以減少震盪  # 降低學習率確保穩定
+    "lr": 2.5e-4,  # 降低學習率確保穩定
     "gamma": 0.99,  # 折扣因子
     "lam": 0.95,  # GAE lambda
-    "clip_eps": 0.1,  # 降低 from 0.2 以限制更新幅度  # PPO clip 範圍
-    "vf_coef": 1.0,  # 增加 from 0.5 以加強 critic 訓練  # Value function 係數
-    "ent_coef": 0.02,  # 增加 from 0.01 以增加探索  # 降低 entropy 鼓勵更確定的策略
-    "max_grad_norm": 0.3,  # 降低 from 0.5 以更強梯度裁剪  # 梯度裁剪
+    "clip_eps": 0.2,  # PPO clip 範圍
+    "vf_coef": 0.5,  # Value function 係數
+    "ent_coef": 0.01,  # 降低 entropy 鼓勵更確定的策略
+    "max_grad_norm": 0.5,  # 梯度裁剪
     "horizon": 4096,  # 增加 rollout 長度
 }
 
@@ -26,12 +26,12 @@ CPU_CONFIG = {
     "device": "cpu",
     "batch_size": 64,
     "ppo_epochs": 4,
-    "lr": 1e-4,  # 降低 from 3e-4 以減少震盪
+    "lr": 3e-4,
     "gamma": 0.99,
     "lam": 0.95,
     "clip_eps": 0.2,
     "vf_coef": 0.5,
-    "ent_coef": 0.02,  # 調整 from 0.05 以平衡探索
+    "ent_coef": 0.05,
     "max_grad_norm": 0.5,
     "horizon": 2048,
 }

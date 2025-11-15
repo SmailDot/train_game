@@ -2204,6 +2204,39 @@ class GameUI:
                     except Exception:
                         pass
 
+                    # 🔧 修復：保存完整歷史到單獨文件（用於崩潰檢測）
+                    try:
+                        history_file = os.path.join(
+                            "checkpoints", "training_history.json"
+                        )
+                        history = []
+                        if os.path.exists(history_file):
+                            try:
+                                with open(history_file, "r", encoding="utf-8") as f:
+                                    history = json.load(f)
+                            except:
+                                history = []
+
+                        # 添加當前記錄
+                        history.append(
+                            {
+                                "name": name,
+                                "score": score,
+                                "iteration": iteration_idx,
+                                "timestamp": None,  # 可以添加時間戳
+                            }
+                        )
+
+                        # 只保留最近 1000 條（避免文件過大）
+                        history = sorted(
+                            history, key=lambda x: x["iteration"], reverse=True
+                        )[:1000]
+
+                        with open(history_file, "w", encoding="utf-8") as f:
+                            json.dump(history, f, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass  # 不中斷主流程
+
                     # 檢查是否打破歷史記錄，立即更新 checkpoint_best.pt
                     try:
                         self._check_and_update_best_checkpoint(score, iteration_idx)
