@@ -54,6 +54,8 @@
    - Actor-Critic 神經網路架構
    - Generalized Advantage Estimation (GAE)
    - 多環境並行訓練 (SubprocVecEnv)
+     - **訓練環境**：32 個並行環境，加速經驗收集
+     - **評估環境**：4 個獨立環境，用於定期測試模型性能
    - GPU/CPU 自動適配
 
 2. **智能自適應系統**
@@ -1059,17 +1061,22 @@ pre-commit run --all-files
 
 ## 🧾 訓練公式 (Training formulas)
 
-下面以標準 LaTeX 形式列出常用的訓練公式，包含 PPO（含 GAE）。請將此小節放在「深度學習原理」與「損失函數詳解」附近以便快速參考。
-
-### PPO（含 GAE）
-
-折扣回報（Discounted return）：
+### 1. 折扣回報 (Discounted Return)
 
 $$
 G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k}
 $$
 
-優勢估計（GAE）：
+**📝 公式含義：**
+* **$G_t$ (總回報)**：代表 AI 從當前時間點 $t$ 開始，直到遊戲結束所能獲得的「總分」。
+* **$\gamma$ (Gamma, 折扣因子)**：通常設為 0.99。
+    * 它的作用是讓 AI **「看重當下，兼顧未來」**。
+    * $\gamma$ 越接近 1，AI 越有遠見（在意未來的障礙物）；$\gamma$ 越小，AI 越短視（只想立刻拿分）。
+* **$r_{t+k}$**：未來每一步的即時獎勵（例如通過障礙 +5）。
+
+---
+
+### 2. 優勢估計 (GAE - Generalized Advantage Estimation)
 
 $$
 \begin{aligned}
@@ -1078,32 +1085,69 @@ $$
 \end{aligned}
 $$
 
-裁剪後的 PPO 目標（Clipped objective）：
+**📝 公式含義：**
+* **$\delta_t$ (TD Error / 驚喜度)**：
+    * 意思就是：「實際發生的結果」跟「AI 原本預期」的落差。
+    * 如果 $\delta_t > 0$，代表這一步走得**比預期好**（例如原本以為會撞牆，結果過了）。
+* **$\hat{A}_t$ (優勢值)**：
+    * 這是 PPO 判斷動作好壞的關鍵指標。
+    * **$\hat{A}_t > 0$**：代表在這個狀態下，這個動作是**好的**（優於平均），應該增加機率。
+    * **$\hat{A}_t < 0$**：代表這個動作是**壞的**（劣於平均），應該減少機率。
+* **$\lambda$ (Lambda)**：平衡偏差與變異數的參數（通常 0.95），決定 AI 要看多遠的「驚喜」。
+
+---
+
+### 3. PPO 裁剪目標 (Clipped Objective) — **核心靈魂**
 
 $$
 L^{\mathrm{CLIP}}(\theta) = -\mathbb{E}_t\left[ \min\left( r_t(\theta) \hat{A}_t, \; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\, \hat{A}_t \right) \right]
 $$
 
-其中
+其中概率比率為：
 
 $$
 r_t(\theta) = \frac{\pi_{\theta}(a_t\mid s_t)}{\pi_{\theta_{\mathrm{old}}}(a_t\mid s_t)}.
 $$
 
-值函數與熵項：
+**📝 公式含義：**
+* **$r_t(\theta)$ (概率比率)**：比較「新策略」與「舊策略」對同一個動作的喜好程度。
+    * $r > 1$：新策略比舊策略更想做這個動作。
+    * $r < 1$：新策略想減少做這個動作。
+* **$\epsilon$ (Epsilon, 裁剪範圍)**：通常設為 0.2。
+    * 這是一個**安全閥**。它限制 $r_t(\theta)$ 只能在 $[0.8, 1.2]$ 之間變動。
+    * **作用**：防止 AI 因為一次運氣好的嘗試，就過度自信地大幅修改策略（避免「學壞」或訓練崩潰）。
+* **$min$ (取最小值)**：這是悲觀主義的體現。在「原本的優化目標」和「裁剪後的目標」中選比較差的那個，確保更新步伐永遠是安全的。
+
+---
+
+### 4. 值函數與熵項 (Value Function & Entropy)
 
 $$L^{\mathrm{VF}} = \mathbb{E}_t \left[ (V_{\theta}(s_t) - G_t)^2 \right], \qquad S[\pi_{\theta}] = -\sum_a \pi_{\theta}(a \mid s_t) \log \pi_{\theta}(a \mid s_t)$$
 
-總損失（policy + value + entropy）：
+**📝 公式含義：**
+* **$L^{\mathrm{VF}}$ (價值損失)**：
+    * 這是一個**均方誤差 (MSE)**。
+    * 目的是訓練 Critic (評論家) 能夠**更準確地預測分數**。若預測不準，AI 就不知道哪個動作真正有價值。
+* **$S[\pi_{\theta}]$ (熵 / 隨機性)**：
+    * 衡量 AI 策略的「多樣性」。
+    * **高熵**：AI 嘗試各種動作（探索期）。
+    * **低熵**：AI 只認定一種動作（收斂期）。
+    * 在公式中加入這一項（前面帶負號或作為獎勵），是為了**強迫 AI 保持好奇心**，不要太早放棄嘗試新路徑（避免落入局部最優解，如勝率 50% 的困境）。
+
+---
+
+### 5. 總損失函數 (Total Loss)
 
 
 $$
 L = L^{\mathrm{CLIP}} + c_{vf} L^{\mathrm{VF}} - c_{ent} \; S[\pi_{\theta}]
 $$
 
-
-**📉 總損失 (Total Loss)：越低越好**
-- 結合了策略優化、價值預測與熵正則化。
+**📝 公式含義：**
+這是最終用來更新神經網路的總指標，由三部分組成：
+1.  **$L^{\mathrm{CLIP}}$**：讓 Actor (策略) 變強，學會怎麼贏。
+2.  **$c_{vf} L^{\mathrm{VF}}$**：讓 Critic (評分) 變準，學會看清局勢。通常 $c_{vf}=0.5$。
+3.  **$- c_{ent} S$**：鼓勵探索。通常 $c_{ent}=0.01$。注意這裡是減號（因為我們希望最大化熵，而 Loss 是要被最小化的）。
 
 ---
 
