@@ -503,12 +503,13 @@ def get_training_config(target: str = "6666") -> dict:
         config_6666 = base_config.copy()
         config_6666.update(
             {
-                "learning_rate": (1e-4, 5e-5),
+                "learning_rate": (2e-4, 5e-5),  # 稍微提高初始學習率
                 "ent_coef": 0.01,
-                "vf_coef": 1.5,
-                "n_steps": 1536,
-                "batch_size": 2048,
-                "n_epochs": 12,
+                "vf_coef": 1.0,
+                "n_steps": 4096,  # 增加 n_steps 讓每次更新看到更長軌跡 (2048 -> 4096)
+                "batch_size": 8192,  # 增加 batch_size (4096 -> 8192)
+                "n_epochs": 10,
+                "hidden_dim": 512,  # 增加網絡容量 (256 -> 512)
             }
         )
         return config_6666
@@ -589,8 +590,38 @@ def main():
         choices=["none", "progressive"],
         help="指定訓練時期望使用的難度課程",
     )
+    parser.add_argument(
+        "--auto-resume",
+        action="store_true",
+        help="自動嘗試載入最佳或最新的模型繼續訓練",
+    )
 
     args = parser.parse_args()
+
+    # 自動恢復邏輯
+    if args.auto_resume and not args.load:
+        candidates = [
+            f"./models/ppo_game2048_{args.target}_final.zip",
+            "./best_model/best_model.zip",
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                print(f"🔄 自動偵測到現有模型，準備恢復訓練: {path}")
+                args.load = path
+                # 嘗試尋找對應的正規化檔案
+                norm_candidates = [
+                    f"./models/vec_normalize_{args.target}.pkl",
+                    path.replace(".zip", ".pkl"),
+                    os.path.join(
+                        os.path.dirname(path), f"vec_normalize_{args.target}.pkl"
+                    ),
+                ]
+                for np_path in norm_candidates:
+                    if os.path.exists(np_path):
+                        print(f"   └── 發現正規化統計: {np_path}")
+                        args.norm_path = np_path
+                        break
+                break
 
     # 設置隨機種子
     np.random.seed(args.seed)

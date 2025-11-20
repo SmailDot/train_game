@@ -1,0 +1,11 @@
+{
+  "episodes": 40,
+  "reward_mean": 5462.071191585064,
+  "reward_std": 3059.9967525057095,
+  "length_mean": 62056.425,
+  "length_std": 33575.526014410774,
+  "passes_mean": 991.25,
+  "passes_std": 538.9932629449091,
+  "wins_total": 23,
+  "win_rate": 0.575
+}

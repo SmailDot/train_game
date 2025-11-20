@@ -124,6 +124,8 @@ class GameEnv:
                 min(ob_x, self.MaxDist) / self.MaxDist,
                 gap_top / self.ScreenHeight,
                 gap_bottom / self.ScreenHeight,
+                (gap_top - self.y) / self.ScreenHeight,  # Relative dist to top
+                (gap_bottom - self.y) / self.ScreenHeight,  # Relative dist to bottom
             ],
             dtype=np.float32,
         )
@@ -189,14 +191,15 @@ class GameEnv:
             self.obstacles.append([spawn_x, gap_top, gap_bottom, False])
             break  # Only spawn one per step
 
-        reward = self.StepPenalty  # 輕微時間懲罰，促使快速通關
+        reward = 0.0  # Removed StepPenalty as requested
         done = False
         win = False
 
         # 球的半徑（與 UI 中的繪製大小一致）
         ball_radius = 12.0
         obstacle_width = float(getattr(self, "ObstacleWidth", 40.0))
-        collision_padding = float(getattr(self, "CollisionPadding", 4.0))
+        # Remove collision padding to match visuals exactly
+        collision_padding = 0.0
         ball_left = -ball_radius
         ball_right = ball_radius
 
@@ -215,7 +218,23 @@ class GameEnv:
             alignment_score = 1.0 - normalized_distance
             reward += self.AlignmentRewardScale * alignment_score
 
+            # Distance Reward: Encourage moving towards the goal (passing obstacles)
+            # Give a small reward for being close to the gap center vertically
+            # And implicitly, passing obstacles gives a large reward.
+            # Here we add a small reward based on horizontal progress relative to the nearest obstacle
+            # If the obstacle is approaching (x decreasing), it means we are surviving.
+            # But to encourage "winning" (reaching score), we need to incentivize speed or progress.
+            # Since speed is constant/controlled by scroll, we incentivize "not dying" + "passing".
+
+            # Time Penalty: Encourage finishing quickly (or rather, not loitering if that were possible,
+            # but here scroll is fixed. However, user requested it to prevent "farming" behavior if any).
+            # In a fixed-scroll game, time penalty might just lower total score, but let's add it as requested.
+            reward -= 0.01
+
         reward -= self.VelocityPenaltyScale * (abs(self.vy) / self.MaxAbsVel)
+
+        # Survival reward: encourage staying alive (User wants to replace this with winning focus)
+        # reward += 0.01 # Removed to focus on winning/passing
 
         # Check collisions and pass-through events for all obstacles
         for obs in self.obstacles:
@@ -238,6 +257,12 @@ class GameEnv:
                 if ball_top >= gap_top and ball_bottom <= gap_bottom:
                     reward += 5.0
                     self.passed_count += 1
+
+                    # Check for winning condition
+                    if self.episode_score + reward >= self.WinningScore:
+                        reward += 1000.0  # Huge reward for winning
+                        win = True
+                        done = True
 
             # Check collision: obstacle rectangle overlaps with球體
             horizontally_overlap = (ob_x - collision_padding) < ball_right and (
@@ -262,7 +287,9 @@ class GameEnv:
         self.episode_score += float(reward)
 
         # 檢查勝利條件：達到 WinningScore 分即通關
-        if self.episode_score >= self.WinningScore:
+        # Note: We already checked this inside the obstacle passing logic,
+        # but keeping it here as a safety net for other score sources.
+        if not win and self.episode_score >= self.WinningScore:
             reward += 1000.0  # 給予巨大獎勵
             done = True
             win = True

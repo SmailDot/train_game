@@ -1371,10 +1371,14 @@ class GameUI:
         candidates = []
         if self.replay_model_path:
             candidates.append(self.replay_model_path)
+
+        # Prioritize best_model.zip because it represents the peak performance
+        # during training, whereas final.zip might be at a point of high exploration
+        # or temporary performance dip.
         candidates.extend(
             [
-                os.path.join("models", "ppo_game2048_6666_final.zip"),
                 os.path.join("best_model", "best_model.zip"),
+                os.path.join("models", "ppo_game2048_6666_final.zip"),
             ]
         )
         for path in candidates:
@@ -1424,7 +1428,14 @@ class GameUI:
 
         self._update_layout(self.width, self.height)
 
-        state = initial_state if initial_state is not None else self.env.reset()
+        # Use a fixed seed for Replay to ensure consistency
+        # This ensures that every time the user clicks Replay, they see the exact same level layout.
+        if initial_state is None:
+            self.env.game.rng.seed(42)  # Fixed seed for consistency
+            state = self.env.reset()
+        else:
+            state = initial_state
+
         return state
 
     def handle_click(self, pos):

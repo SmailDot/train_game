@@ -46,10 +46,10 @@ class Game2048Env(gym.Env):
         # 定義動作空間：離散動作 (0: 不跳, 1: 跳)
         self.action_space = spaces.Discrete(2)
 
-        # 定義觀察空間：5 維連續狀態 (y, vy, x_obs, gap_top, gap_bottom)
-        # 所有值都已經正規化到 [0, 1]
+        # 定義觀察空間：7 維連續狀態 (y, vy, x_obs, gap_top, gap_bottom, rel_top, rel_bottom)
+        # 值域約為 [-1, 1]
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(5,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(7,), dtype=np.float32
         )
 
         # 追蹤資訊
