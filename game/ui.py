@@ -14,21 +14,6 @@ from game.ai_manager import AlgorithmDescriptor, AlgorithmManager, AlgorithmStat
 from game.environment import GameEnv
 from game.training_dialog import TrainingDialog
 
-try:  # Optional advanced trainers
-    from agents.q_learning_trainer import QLearningTrainer
-except Exception:
-    QLearningTrainer = None
-
-try:
-    from agents.sac_trainer import SACTrainer
-except Exception:
-    SACTrainer = None
-
-try:
-    from agents.td3_trainer import TD3Trainer
-except Exception:
-    TD3Trainer = None
-
 try:
     from agents.sb3_replay_agent import SB3ReplayAgent
 except Exception:
@@ -116,7 +101,6 @@ class GameUI:
         self.btn_init = pygame.Rect(0, 0, 0, 0)
         self.btn_speed = pygame.Rect(0, 0, 0, 0)
         self.btn_parallel = pygame.Rect(0, 0, 0, 0)
-        self.btn_multi_view = pygame.Rect(0, 0, 0, 0)  # 多視窗觀看按鈕
         self.btn_clear_board = None  # 清除排行榜按鈕（只在排行榜模式顯示）
         self._btn_save_template = pygame.Rect(0, 0, 0, 0)
         self.btn_save = None
@@ -256,64 +240,6 @@ class GameUI:
                 window_title=f"PPO 訓練視窗 ({device_str.upper()})",
             )
         ]
-
-        if SACTrainer is not None:
-            descriptors.append(
-                AlgorithmDescriptor(
-                    key="sac",
-                    name="SAC",
-                    trainer_factory=SACTrainer,
-                    use_vector_envs=False,
-                    vector_envs=1,
-                    hotkey=pygame.K_2,
-                    action_label="2",
-                    color=(180, 255, 180),
-                    window_title="SAC 訓練視窗",
-                )
-            )
-
-        if TD3Trainer is not None:
-            descriptors.append(
-                AlgorithmDescriptor(
-                    key="td3",
-                    name="TD3",
-                    trainer_factory=TD3Trainer,
-                    use_vector_envs=False,
-                    vector_envs=1,
-                    hotkey=pygame.K_3,
-                    action_label="3",
-                    color=(255, 200, 150),
-                    window_title="TD3 訓練視窗",
-                )
-            )
-
-        if QLearningTrainer is not None:
-            descriptors.append(
-                AlgorithmDescriptor(
-                    key="dqn",
-                    name="DQN",
-                    trainer_factory=lambda: QLearningTrainer(mode="dqn"),
-                    use_vector_envs=False,
-                    vector_envs=1,
-                    hotkey=pygame.K_4,
-                    action_label="4",
-                    color=(200, 180, 255),
-                    window_title="DQN 訓練視窗",
-                )
-            )
-            descriptors.append(
-                AlgorithmDescriptor(
-                    key="double_dqn",
-                    name="Double DQN",
-                    trainer_factory=lambda: QLearningTrainer(mode="double_dqn"),
-                    use_vector_envs=False,
-                    vector_envs=1,
-                    hotkey=pygame.K_5,
-                    action_label="5",
-                    color=(220, 160, 255),
-                    window_title="Double DQN 訓練視窗",
-                )
-            )
 
         for desc in descriptors:
             self.ai_manager.register(desc)
@@ -665,8 +591,6 @@ class GameUI:
         self.btn_replay = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
         self.btn_board = pygame.Rect(left, top, btn_width, btn_height)
-        top += btn_height + spacing
-        self.btn_multi_view = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
         self.btn_init = pygame.Rect(left, top, btn_width, btn_height)
         top += btn_height + spacing
@@ -1025,7 +949,6 @@ class GameUI:
             (self.btn_ai, "AI 訓練", self.large_font, (70, 70, 80)),
             (self.btn_replay, "SB3 Replay", self.large_font, (60, 80, 110)),
             (self.btn_board, "排行榜", self.large_font, (70, 70, 80)),
-            (self.btn_multi_view, "多視窗觀看", self.font, (80, 70, 120)),
             (self.btn_init, "初始化訓練", self.font, (70, 70, 80)),
             (
                 self.btn_speed,
@@ -1504,31 +1427,6 @@ class GameUI:
         state = initial_state if initial_state is not None else self.env.reset()
         return state
 
-    def _launch_multi_window_view(self):
-        """啟動多視窗觀看模式"""
-        import subprocess
-        import sys
-
-        print("🚀 正在啟動多視窗觀看模式...")
-        print("將開啟 5 個訓練視窗（PPO, SAC, DQN, Double DQN, TD3）")
-
-        try:
-            # 使用 subprocess 在背景執行 run_multi_train.py
-            script_path = "run_multi_train.py"
-            subprocess.Popen(
-                [sys.executable, script_path],
-                creationflags=(
-                    subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-                ),
-            )
-            print("✅ 多視窗模式已啟動！")
-            print("提示：關閉所有新視窗以結束多視窗模式")
-        except Exception as e:
-            print(f"❌ 啟動多視窗模式失敗：{e}")
-            import traceback
-
-            traceback.print_exc()
-
     def handle_click(self, pos):
         # Handle training dialog clicks
         if self.show_training_dialog and self.training_dialog is not None:
@@ -1655,11 +1553,6 @@ class GameUI:
                 self._save_scores()
                 print("✅ 已清除所有排行榜紀錄")
                 return None
-
-        if not self.running and self.btn_multi_view.collidepoint(pos):
-            # 啟動多視窗觀看模式
-            self._launch_multi_window_view()
-            return None
 
     def _handle_save_training(self):
         if self.mode != "AI":

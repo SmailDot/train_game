@@ -35,10 +35,6 @@ class TrainingDialog:
         # 算法選項
         self.algorithms = [
             ("PPO", "Proximal Policy Optimization - 穩定高效"),
-            ("SAC", "Soft Actor-Critic - 連續控制"),
-            ("DQN", "Deep Q-Network - 經典算法"),
-            ("DDQN", "Double DQN - 改進的 DQN"),
-            ("TD3", "Twin Delayed DDPG - 高級算法"),
         ]
         self.selected_algorithm = 0  # 預設選擇 PPO
 

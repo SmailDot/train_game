@@ -11,7 +11,7 @@ import sys
 from argparse import BooleanOptionalAction
 from collections import deque
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -47,6 +47,65 @@ def make_linear_schedule(start: float, end: float):
         return end + (start - end) * progress_remaining
 
     return schedule
+
+
+def apply_finetune_overrides(
+    model: PPO,
+    finetune_lr: Optional[float] = None,
+    finetune_ent: Optional[float] = None,
+) -> None:
+    """Optionally override learning rate or entropy for fine-tuning runs."""
+
+    if finetune_lr is not None:
+        target_lr = float(finetune_lr)
+
+        def _fixed_lr(_progress_remaining: float) -> float:
+            return target_lr
+
+        model.lr_schedule = _fixed_lr
+        model.learning_rate = target_lr
+        optimizer = getattr(model.policy, "optimizer", None)
+        if optimizer is not None:
+            for group in optimizer.param_groups:
+                group["lr"] = target_lr
+        print(f"⚙️ Fine-tune learning rate -> {target_lr:.2e}")
+
+    if finetune_ent is not None:
+        target_ent = float(finetune_ent)
+        model.ent_coef = target_ent
+        print(f"⚙️ Fine-tune entropy coef -> {target_ent:.5f}")
+
+
+def get_curriculum_phases(name: str) -> List[Dict[str, dict]]:
+    if name != "progressive":
+        return []
+
+    return [
+        {
+            "threshold": 0,
+            "profile": {
+                "ScrollIncreasePerPass": 0.012,
+                "MaxScrollSpeed": 3.0,
+                "GapShrinkPerPass": 0.4,
+            },
+        },
+        {
+            "threshold": 1_500_000,
+            "profile": {
+                "ScrollIncreasePerPass": 0.018,
+                "MaxScrollSpeed": 3.6,
+                "GapShrinkPerPass": 0.6,
+            },
+        },
+        {
+            "threshold": 3_000_000,
+            "profile": {
+                "ScrollIncreasePerPass": 0.025,
+                "MaxScrollSpeed": 4.2,
+                "GapShrinkPerPass": 0.8,
+            },
+        },
+    ]
 
 
 class WinCallback(BaseCallback):
@@ -176,6 +235,54 @@ class AdaptiveEntropyCallback(BaseCallback):
         return True
 
 
+class CurriculumCallback(BaseCallback):
+    """Gradually ramp environment difficulty according to predefined phases."""
+
+    def __init__(self, phases: List[Dict[str, dict]], verbose: int = 0):
+        super().__init__(verbose)
+        self.phases = sorted(phases, key=lambda item: item["threshold"])
+        self._current_phase = -1
+
+    def _apply_phase(self, index: int) -> None:
+        if index < 0 or index >= len(self.phases):
+            return
+
+        profile = self.phases[index]["profile"]
+        threshold = self.phases[index]["threshold"]
+        self._current_phase = index
+
+        if self.verbose:
+            print(
+                "📈 課程階段"
+                f" {index + 1}/{len(self.phases)} @ step {threshold:,}: {profile}"
+            )
+
+        env_method = getattr(self.training_env, "env_method", None)
+        if env_method is not None:
+            try:
+                env_method("apply_difficulty_profile", profile)
+            except AttributeError:
+                if self.verbose:
+                    print("⚠️ 無法套用課程設定，環境缺少 apply_difficulty_profile。")
+
+    def _on_training_start(self) -> None:
+        if self.phases:
+            self._apply_phase(0)
+
+    def _on_step(self) -> bool:
+        if not self.phases:
+            return True
+
+        next_index = self._current_phase + 1
+        if (
+            next_index < len(self.phases)
+            and self.num_timesteps >= self.phases[next_index]["threshold"]
+        ):
+            self._apply_phase(next_index)
+
+        return True
+
+
 def create_envs(
     n_envs: int = 32,
     normalize: bool = True,
@@ -241,6 +348,8 @@ def create_callbacks(
     save_freq: int = 10000,
     norm_path: Optional[str] = None,
     seed: int = 42,
+    adaptive_entropy: bool = True,
+    curriculum_phases: Optional[List[Dict[str, dict]]] = None,
 ):
     """建立訓練/評估所需的回調。"""
 
@@ -287,7 +396,10 @@ def create_callbacks(
 
     callbacks.append(WinCallback(verbose=1))
     callbacks.append(EpisodeStatsCallback(verbose=0))
-    callbacks.append(AdaptiveEntropyCallback(verbose=0))
+    if curriculum_phases:
+        callbacks.append(CurriculumCallback(curriculum_phases, verbose=1))
+    if adaptive_entropy:
+        callbacks.append(AdaptiveEntropyCallback(verbose=0))
 
     return CallbackList(callbacks)
 
@@ -454,6 +566,29 @@ def main():
     )
     parser.add_argument("--load", type=str, help="載入現有模型路徑")
     parser.add_argument("--seed", type=int, default=42, help="隨機種子")
+    parser.add_argument(
+        "--finetune-lr",
+        type=float,
+        help="針對載入模型覆寫固定學習率 (僅在 --load 時生效)",
+    )
+    parser.add_argument(
+        "--finetune-ent",
+        type=float,
+        help="針對載入模型覆寫熵係數 (僅在 --load 時生效)",
+    )
+    parser.add_argument(
+        "--adaptive-entropy",
+        action=BooleanOptionalAction,
+        default=True,
+        help="啟用自適應熵回調 (fine-tune 時可停用)",
+    )
+    parser.add_argument(
+        "--curriculum",
+        type=str,
+        default="none",
+        choices=["none", "progressive"],
+        help="指定訓練時期望使用的難度課程",
+    )
 
     args = parser.parse_args()
 
@@ -468,6 +603,10 @@ def main():
     print(f"⏱️ 總步數: {args.total_timesteps:,}")
     print(f"🖥️ 設備: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
     print("=" * 60)
+
+    curriculum_phases = get_curriculum_phases(args.curriculum)
+    if curriculum_phases:
+        print(f"📈 啟用課程: {args.curriculum} ({len(curriculum_phases)} 階段)")
 
     if not args.normalize and args.norm_path:
         print("⚠️ 已停用 VecNormalize，忽略 --norm-path 參數。")
@@ -493,6 +632,8 @@ def main():
     else:
         model = create_model(env, config)
 
+    apply_finetune_overrides(model, args.finetune_lr, args.finetune_ent)
+
     # 創建回調
     callbacks = create_callbacks(
         env,
@@ -501,6 +642,8 @@ def main():
         save_freq=args.save_freq,
         norm_path=args.norm_path,
         seed=args.seed,
+        adaptive_entropy=args.adaptive_entropy,
+        curriculum_phases=curriculum_phases,
     )
 
     # 開始訓練！

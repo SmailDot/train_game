@@ -1228,7 +1228,7 @@ pre-commit run --all-files
 
 ## 🧾 訓練公式 (Training formulas)
 
-下面以標準 LaTeX 形式列出常用的訓練公式，包含 PPO（含 GAE）、DQN / Double DQN、SAC（離散版）與 TD3（連續版，供比較）。請將此小節放在「深度學習原理」與「損失函數詳解」附近以便快速參考。
+下面以標準 LaTeX 形式列出常用的訓練公式，包含 PPO（含 GAE）。請將此小節放在「深度學習原理」與「損失函數詳解」附近以便快速參考。
 
 ### PPO（含 GAE）
 
@@ -1270,71 +1270,6 @@ $$
 
 $$
 L = L^{\mathrm{CLIP}} + c_{vf} L^{\mathrm{VF}} - c_{ent} \; S[\pi_{\theta}]
-$$
-
----
-
-### DQN / Double DQN（Q-Learning Trainer）
-
-經驗回放樣本的目標值：
-
-$$
-\begin{aligned}
-y_t^{\mathrm{DQN}} &= r_t + \gamma \max_{a'} Q_{\theta^-}(s_{t+1}, a'),\\
-y_t^{\mathrm{DDQN}} &= r_t + \gamma Q_{\theta^-}\bigl(s_{t+1}, \arg\max_{a'} Q_{\theta}(s_{t+1}, a')\bigr).
-\end{aligned}
-$$
-
-平方損失（MSE）：
-
-$$
-L(\theta) = \mathbb{E}_t\big[ (y_t - Q_{\theta}(s_t, a_t))^2 \big].
-$$
-
----
-
-### SAC（離散版）
-
-Critic 目標（Q-net loss）：
-
-$$
-J_Q = \mathbb{E}\big[ (Q_{\phi}(s_t,a_t) - y_t)^2 \big],
-$$
-
-其中目標值為：
-
-$$
-y_t = r_t + \gamma\; \mathbb{E}_{a_{t+1}\sim\pi}\Big[ \min\big( Q_{\bar{\phi}_1}(s_{t+1},a_{t+1}),\; Q_{\bar{\phi}_2}(s_{t+1},a_{t+1}) \big) - \alpha\,\log\pi(a_{t+1}\mid s_{t+1}) \Big].
-$$
-
-Actor 目標（policy loss）：
-
-$$
-J_{\pi} = \mathbb{E}_{s_t\sim D}\Big[ \mathbb{E}_{a_t\sim\pi}\big[ \alpha \log \pi(a_t\mid s_t) - Q_{\phi}(s_t,a_t) \big] \Big].
-$$
-
-雙網路軟更新（target networks soft update）：
-
-$$
-\bar{\phi} \leftarrow \tau \phi + (1-\tau) \bar{\phi}.
-$$
-
----
-
-### TD3（連續版，供比較）
-
-TD3 的重點：使用兩個 critic 取最小值以防止 Q-value 高估；延遲更新 actor 與 target policy smoothing。
-
-平滑目標動作（target policy smoothing）：
-
-$$
-\tilde{a} = \text{clip}\big(\pi_{\theta^-}(s_{t+1}) + \epsilon,\; a_{\mathrm{low}},\; a_{\mathrm{high}}\big)
-$$
-
-對應目標值：
-
-$$
-y_t = r_t + \gamma \min_{i=1,2} Q_{\phi_i^-}(s_{t+1}, \tilde{a}).
 $$
 
 ---
@@ -1654,7 +1589,6 @@ pre-commit run --all-files
 - [x] GPU/CPU 自動適配
 
 ### 🚧 進行中
-- [ ] 添加更多 RL 演算法 (SAC, TD3, DDPG)
 - [ ] 改進神經網路可視化
 - [ ] 增強訓練分析工具
 

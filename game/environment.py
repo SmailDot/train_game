@@ -86,6 +86,17 @@ class GameEnv:
         min_half = max(self.MinGapHalf, max_half - 20.0)
         return self.rng.uniform(min_half, max_half)
 
+    def apply_difficulty_profile(self, profile: dict) -> None:
+        """Dynamically adjust difficulty-related attributes from a profile dict."""
+
+        if not isinstance(profile, dict):
+            return
+
+        for key, value in profile.items():
+            if not hasattr(self, key):
+                continue
+            setattr(self, key, value)
+
     def _find_nearest_obstacle(self):
         """Return the nearest obstacle that is still in front of the player."""
         nearest_obs = None

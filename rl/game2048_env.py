@@ -136,6 +136,14 @@ class Game2048Env(gym.Env):
         """關閉環境"""
         pass
 
+    # Curriculum integration -------------------------------------------------
+    def apply_difficulty_profile(self, profile: Dict[str, Any]) -> None:
+        """Forward curriculum difficulty profiles to the underlying GameEnv."""
+
+        apply_method = getattr(self.game, "apply_difficulty_profile", None)
+        if callable(apply_method):
+            apply_method(profile)
+
     # 兼容性方法
     def seed(self, seed: Optional[int] = None):
         """設置隨機種子 (向後兼容)"""
