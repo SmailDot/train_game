@@ -1092,15 +1092,14 @@ $$
 
 值函數與熵項：
 
-$$
-L^{\mathrm{VF}} = \mathbb{E}_t\big[ (V_{\theta}(s_t) - G_t)^2 \big],\qquad
-S[\pi_{\theta}](s_t) = -\sum_a \pi_{\theta}(a\mid s_t) \log \pi_{\theta}(a\mid s_t).
-$$
+$$L^{\mathrm{VF}} = \mathbb{E}_t \left[ (V_{\theta}(s_t) - G_t)^2 \right], \qquad S[\pi_{\theta}] = -\sum_a \pi_{\theta}(a \mid s_t) \log \pi_{\theta}(a \mid s_t)$$
 
 總損失（policy + value + entropy）：
 
 
-$$L^{\mathrm{VF}} = \mathbb{E}_t \left[ (V_{\theta}(s_t) - G_t)^2 \right], \qquad S[\pi_{\theta}] = -\sum_a \pi_{\theta}(a \mid s_t) \log \pi_{\theta}(a \mid s_t)$$
+$$
+L = L^{\mathrm{CLIP}} + c_{vf} L^{\mathrm{VF}} - c_{ent} \; S[\pi_{\theta}]
+$$
 
 
 **📉 總損失 (Total Loss)：越低越好**
