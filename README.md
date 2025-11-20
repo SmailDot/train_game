@@ -33,7 +33,7 @@
 
 ## 🎯 專案簡介
 
-**Train Game** 是一個完整的深度強化學習訓練平台，結合了：
+**Train Game** 是一個完整的深度強化学习訓練平台，結合了：
 - **遊戲環境**：類 Flappy Bird 的 2D 物理引擎
 - **AI 演算法**：PPO (Proximal Policy Optimization) 深度強化學習
 - **視覺化介面**：實時觀察訓練過程與神經網路狀態
@@ -457,11 +457,11 @@ tensorboard --logdir=checkpoints/tb --port=6006
 │    遊戲畫面          │  ├─ 訓練中: ✓ / ✗                 │
 │    (600×600)         │  ├─ 當前分數: XXX                 │
 │                      │  ├─ 訓練迭代: XXXX                │
-│    🏀 (球體)         │  ├─ 學習率: 0.000XXX              │
-│    ║ ║ (障礙物)     │  └─ 平均獎勵: XX.XX               │
-│    ║ ║              │                                   │
-│                      │  🏆 排行榜 Top 5                   │
-│                      │  1. AI-PPO: 1250                  │
+│                      │  ├─ 學習率: 0.000XXX              │
+│                      │  └─ 平均獎勵: XX.XX               │
+│    🏀 (球體)         │                                   │
+│    ║ ║ (障礙物)     │  🏆 排行榜 Top 5                   │
+│    ║ ║              │  1. AI-PPO: 1250                  │
 │                      │  2. Player: 980                   │
 │                      │  ...                              │
 └──────────────────────┴──────────────────────────────────┘
@@ -528,6 +528,48 @@ action = 1  # 跳躍（施加 -7.0 的向上衝量）
 - **信賴域方法** (Trust Region)：限制策略更新幅度，避免破壞性更新
 - **Actor-Critic** 架構：同時學習策略（Actor）和價值函數（Critic）
 
+### 🔄 PPO 訓練流程全解 (Complete Training Flow)
+
+PPO 的訓練並非魔法，而是一個嚴謹的數學循環。以下是它如何一步步讓 AI 變強的完整過程：
+
+```mermaid
+graph TD
+    A[1. 收集經驗 Data Collection] -->|跑 2048 步| B[2. 評估價值 Value Estimation]
+    B -->|計算 GAE| C[3. 計算優勢 Advantage Calculation]
+    C -->|準備數據| D[4. PPO 優化 Optimization]
+    D -->|更新權重| E[5. 策略更新 Policy Update]
+    E -->|新策略| A
+```
+
+#### 步驟 1：收集經驗 (Data Collection)
+- **做什麼**：AI 在遊戲中實際遊玩，收集數據。
+- **細節**：16 個並行環境同時運行，每個跑 2048 步。
+- **產出**：共 32,768 筆 `(狀態, 動作, 獎勵, 下一狀態)` 的數據。
+- **關鍵**：此时使用的是「舊策略」($\pi_{old}$)，我們需要這些數據來評估舊策略的好壞。
+
+#### 步驟 2：評估與計算優勢 (Advantage Estimation)
+- **做什麼**：事後諸葛亮，分析剛才的每一步走得好不好。
+- **工具**：使用 **GAE (Generalized Advantage Estimation)**。
+- **邏輯**：
+    - 如果某一步導致了高分，則該動作的「優勢」($A_t$) 為正。
+    - 如果某一步導致了撞牆，則該動作的「優勢」($A_t$) 為負。
+- **產出**：每筆數據都標上了「優勢值」和「目標價值」。
+
+#### 步驟 3：PPO 優化 (Optimization)
+- **做什麼**：根據優勢值來調整神經網路。
+- **核心機制**：
+    - **Actor (策略)**：如果優勢是正的，提高該動作的機率；如果是負的，降低機率。
+    - **Critic (價值)**：修正對狀態價值的預測，讓它更準確。
+    - **Clipping (裁剪)**：**這是 PPO 的精髓**。如果新策略改變太大（例如機率從 10% 變 90%），PPO 會強制「剪掉」多餘的更新幅度，防止學壞。
+- **過程**：將 32,768 筆數據分成小批次 (Minibatches)，重複訓練 10 輪 (Epochs)。
+
+#### 步驟 4：策略更新 (Update)
+- **做什麼**：用訓練好的新參數覆蓋舊參數。
+- **結果**：AI 變強了一點點。
+- **循環**：回到步驟 1，用這個變強的 AI 繼續收集數據。
+
+---
+
 ### 🏗️ Actor-Critic 神經網路架構
 
 ```python
@@ -575,239 +617,28 @@ def forward(self, x):
     return logits, value
 ```
 
-### 🎲 策略輸出 (Policy Output)
-
-從 logit 到動作概率：
-
-```python
-# 1. Sigmoid 轉換為概率
-prob = torch.sigmoid(logits)  # logit ∈ ℝ → prob ∈ [0, 1]
-
-# 2. Bernoulli 分佈採樣
-distribution = Bernoulli(probs=prob)
-action = distribution.sample()  # 0 或 1
-
-# 3. 計算 log 概率（用於 PPO loss）
-log_prob = distribution.log_prob(action)
-```
-
-**範例：**
-```
-logits = 0.8  →  prob = sigmoid(0.8) = 0.69  →  69% 機率跳躍
-logits = -1.2 →  prob = sigmoid(-1.2) = 0.23 →  23% 機率跳躍
-```
+---
 
 ### 📊 Generalized Advantage Estimation (GAE)
+
+**(對應訓練流程步驟 2：評估與計算優勢)**
 
 **目標：** 估計每個動作的"優勢"（相比平均表現有多好）
 
 #### 步驟 1：計算 TD 誤差
-
+```math
+\delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)
 ```
-δₜ = rₜ + γ·V(sₜ₊₁) - V(sₜ)
-```
-
-其中：
-- `rₜ`: 即時獎勵
-- `γ`: 折扣因子 (0.99)
-- `V(sₜ)`: Critic 預測的狀態價值
 
 #### 步驟 2：計算 GAE 優勢
-
-```
-Aₜ = Σᵢ₌₀^∞ (γλ)ⁱ · δₜ₊ᵢ
-```
-
-其中：
-- `λ`: GAE 參數 (0.95)，平衡偏差與方差
-
-**Python 實現：**
-
-```python
-def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
-    advantages = []
-    gae = 0
-    
-    # 從後往前計算
-    for t in reversed(range(len(rewards))):
-        if t == len(rewards) - 1:
-            next_value = 0
-        else:
-            next_value = values[t + 1]
-        
-        # TD 誤差
-        delta = rewards[t] + gamma * next_value * (1 - dones[t]) - values[t]
-        
-        # GAE 累積
-        gae = delta + gamma * lam * (1 - dones[t]) * gae
-        advantages.insert(0, gae)
-    
-    return advantages
+```math
+\hat{A}_t = \sum_{l=0}^{\infty} (\gamma \lambda)^l \; \delta_{t+l}
 ```
 
-#### 步驟 3：計算回報 (Returns)
-
+#### 步驟 3：回報估計
+```math
+R_t = \hat{A}_t + V(s_t)
 ```
-Rₜ = Aₜ + V(sₜ)
-```
-
-這個回報用於訓練 Critic 網路。
-
----
-
-## 📉 損失函數詳解
-
-### 🎯 PPO 總損失函數
-
-```python
-L_total = L_policy + c₁·L_value - c₂·H(π)
-```
-
-其中：
-- `L_policy`: 策略損失（主要優化目標）
-- `L_value`: 價值函數損失
-- `H(π)`: 策略熵（鼓勵探索）
-- `c₁ = 0.5`: 價值損失係數
-- `c₂ = 0.01`: 熵係數
-
----
-
-### 1️⃣ 策略損失 (Policy Loss)
-
-**PPO Clipped Objective：**
-
-```
-L_policy = -E[ min(rₜ(θ)·Aₜ, clip(rₜ(θ), 1-ε, 1+ε)·Aₜ) ]
-```
-
-**詳細拆解：**
-
-#### 概率比率 (Probability Ratio)
-
-```python
-# 舊策略的 log 概率（收集數據時）
-old_log_prob = log π_old(aₜ | sₜ)
-
-# 新策略的 log 概率（當前網路）
-new_log_prob = log π_θ(aₜ | sₜ)
-
-# 概率比率
-ratio = exp(new_log_prob - old_log_prob) = π_θ(aₜ | sₜ) / π_old(aₜ | sₜ)
-```
-
-**直觀理解：**
-- `ratio > 1`: 新策略更傾向選擇這個動作
-- `ratio < 1`: 新策略更不傾向選擇這個動作
-- `ratio = 1`: 策略沒有改變
-
-#### 裁剪機制 (Clipping)
-
-```python
-# 設定裁剪範圍 ε = 0.2
-clip_range = 0.2
-
-# 原始目標
-surr1 = ratio * advantage
-
-# 裁剪後的目標
-surr2 = clip(ratio, 1-ε, 1+ε) * advantage
-      = clip(ratio, 0.8, 1.2) * advantage
-
-# 取較小值（保守更新）
-policy_loss = -min(surr1, surr2).mean()
-```
-
-**裁剪範圍視覺化：**
-
-```
-Advantage > 0 (好的動作):
-    ratio ∈ [0, 0.8]  → 不鼓勵降低概率（限制在0.8）
-    ratio ∈ [0.8, 1.2] → 正常更新
-    ratio ∈ [1.2, ∞]  → 不過度提高概率（限制在1.2）
-
-Advantage < 0 (壞的動作):
-    ratio ∈ [0, 0.8]  → 正常降低概率
-    ratio ∈ [0.8, 1.2] → 正常更新
-    ratio ∈ [1.2, ∞]  → 不鼓勵提高概率（限制在1.2）
-```
-
-**完整 Python 實現：**
-
-```python
-def ppo_policy_loss(states, actions, old_log_probs, advantages, clip_range=0.2):
-    # 前向傳播
-    logits, _ = self.net(states)
-    prob = torch.sigmoid(logits)
-    dist = torch.distributions.Bernoulli(probs=prob)
-    
-    # 新策略的 log 概率
-    new_log_probs = dist.log_prob(actions)
-    
-    # 概率比率
-    ratio = torch.exp(new_log_probs - old_log_probs)
-    
-    # 兩個目標
-    surr1 = ratio * advantages
-    surr2 = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * advantages
-    
-    # 取最小值並加負號（梯度上升 → 梯度下降）
-    policy_loss = -torch.min(surr1, surr2).mean()
-    
-    return policy_loss
-```
-
----
-
-### 2️⃣ 價值函數損失 (Value Loss)
-
-**均方誤差 (MSE)：**
-
-```
-L_value = MSE(V(sₜ), Rₜ) = 1/N Σ (V(sₜ) - Rₜ)²
-```
-
-其中：
-- `V(sₜ)`: Critic 預測的狀態價值
-- `Rₜ`: GAE 計算的回報 (Aₜ + V(sₜ))
-
-**Python 實現：**
-
-```python
-def value_loss(states, returns):
-    _, value = self.net(states)
-    loss = F.mse_loss(value, returns)
-    return loss
-```
-
-**作用：** 訓練 Critic 更準確地預測未來累積獎勵。
-
----
-
-### 3️⃣ 熵損失 (Entropy Loss)
-
-**Bernoulli 分佈熵：**
-
-```
-H(π) = -Σ [p·log(p) + (1-p)·log(1-p)]
-```
-
-其中 `p` 是跳躍概率。
-
-**Python 實現：**
-
-```python
-def entropy_loss(states):
-    logits, _ = self.net(states)
-    prob = torch.sigmoid(logits)
-    dist = torch.distributions.Bernoulli(probs=prob)
-    entropy = dist.entropy().mean()
-    return entropy
-```
-
-**作用：** 
-- 高熵 = 策略更隨機 = 更多探索
-- 低熵 = 策略更確定 = 更多利用
-- 係數 `c₂ = 0.01` 微弱地鼓勵探索
 
 ---
 
@@ -1170,7 +1001,7 @@ def _load_dynamic_config(self, iteration):
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  🎮 Game Environment (×16 並行)                                     │
-│  ├─ 狀態: [y, vy, x_obs, gap_top, gap_bottom]                      │
+│  ├─ 狀態: [y, vy, x_obs, y_{gap\_top}, y_{gap\_bottom}]          │
 │  ├─ 動作: jump (0/1)                                               │
 │  └─ 獎勵: +0.1 (存活) / +5.0 (通過) / -5.0 (碰撞)                  │
 │                                                                     │
@@ -1272,342 +1103,155 @@ $$
 L = L^{\mathrm{CLIP}} + c_{vf} L^{\mathrm{VF}} - c_{ent} \; S[\pi_{\theta}]
 $$
 
----
-
-Notes / implementation hints:
-- 使用 display math ($$ ... $$) 可在支援 MathJax 的平台上正確渲染，且在純 Markdown 中仍可讀。
-- 建議使用 \text{clip} 或 \mathrm{clip}（不要用 \operatorname{clip}，以避免 KaTeX/GitHub 拒絕 macro）。
-- 保留常用變數名稱（G_t, A_t, \delta_t, \gamma, \lambda, \epsilon, \alpha, \tau）以便與實作程式碼對應。
-
-## 📊 參數調整指南
-
-詳細的參數調整建議請參閱 `PARAMETER_TUNING_GUIDE.md`。
-
-**快速參考：**
-- 🚀 **訓練太慢**：增加 `learning_rate`, `n_envs`
-- 🔥 **訓練不穩定**：降低 `learning_rate`, 增加 `batch_size`
-- 🎯 **卡在局部最優**：增加 `ent_coef`, 降低 `learning_rate`
-- 💾 **GPU 記憶體不足**：降低 `batch_size`, `n_envs`, `horizon`
+**📉 總損失 (Total Loss)：越低越好**
+- 結合了策略優化、價值預測與熵正則化。
 
 ---
 
-## 🔧 故障排除
+### 1️⃣ 策略損失 (Policy Loss)
 
-### 常見問題
-
-#### 1. **CUDA out of memory**
-**解決：** 降低 `batch_size` 或 `n_envs`
-
-#### 2. **訓練沒有進步**
-**解決：** 檢查環境難度，增加存活獎勵，降低學習率
-
-#### 3. **訓練迭代不增加**
-**說明：** 正常！1 次迭代 = 32768 步，可能需要數百局遊戲
-
-詳細故障排除請參閱 `TRAINING_GUIDE.md`。
-
----
-
-## 🚀 進階使用
-
-### 🔧 檢查點管理
-
-#### 手動回檔到最佳檢查點
-
-當訓練崩潰後，使用此工具回檔到歷史最佳表現：
-
-```powershell
-python rollback_tool.py
-```
-
-**功能**：
-- 📊 顯示歷史最佳表現（從 `scores.json` 讀取）
-- 📋 列出所有高分檢查點（分數 > 500）
-- 🔄 自動備份當前檢查點
-- ✅ 複製最佳檢查點為新的訓練起點
-
-**使用場景**：
-- 參數調整導致訓練崩潰（從 700+ 降到 200）
-- 最佳模型被覆蓋，需要恢復
-- 想要從特定的歷史檢查點重新開始
-
-#### 檢查點狀態分析與清理
-
-```powershell
-python checkpoint_manager.py
-```
-
-**功能**：
-1. **查看檢查點狀態** - 顯示所有檢查點及其對應分數
-2. **清理低分檢查點** - 刪除分數 < 300 的檢查點（保留最近 10 個）
-3. **創建最佳檢查點** - 從現有檢查點中找出最佳的，複製為 `checkpoint_best.pt`
-
-#### 權重載入診斷
-
-驗證檢查點是否正確載入：
-
-```powershell
-python diagnose_weight_loading.py
-```
-
-**功能**：
-- ✅ 測試權重載入功能
-- 📊 顯示載入前後的權重差異
-- 🔍 模擬 UI 載入流程
-- 💡 提供診斷建議
-
-#### 自動保護機制
-
-**訓練中自動保護**（無需手動操作）：
+**PPO Clipped Objective：**
 
 ```
-每 10 次迭代檢查
-    ↓
-性能下降 > 40%？
-    ├─ 是 → 自動回檔到最近檢查點 ⚠️
-    └─ 否 → 繼續訓練 ✅
-    ↓
-新的歷史最佳？
-    ├─ 是 → 保存 checkpoint_best.pt 💎
-    └─ 否 → 只保存常規檢查點
+L_policy = -E[ min(rₜ(θ)·Aₜ, clip(rₜ(θ), 1-ε, 1+ε)·Aₜ) ]
 ```
 
-**檔案說明**：
-- `checkpoint_XXXX.pt` - 常規檢查點（每 10 次迭代）
-- `checkpoint_best.pt` - 歷史最佳模型（自動保存）
-- `checkpoints/backup/` - 回檔時的備份目錄
+**📉 策略損失 (Policy Loss)：越低越好**
+- 代表模型整體優化程度，結合了策略改進、價值預測準確度和熵正則化。
 
-### 跨電腦訓練遷移
+**詳細拆解：**
 
-```powershell
-# 電腦 A: 推送檢查點
-git add checkpoints/checkpoint_5000.pt
-git commit -m "訓練到 5000 次"
-git push
-
-# 電腦 B: 下載並繼續
-git pull
-python run_game.py  # 自動從最新檢查點恢復
-```
-
-### TensorBoard 監控
-
-```powershell
-tensorboard --logdir=checkpoints/tb --port=6006
-# 訪問 http://localhost:6006
-```
-
-### 純訓練（無 UI）
+#### 概率比率 (Probability Ratio)
 
 ```python
-from agents.pytorch_trainer import PPOTrainer
+# 舊策略的 log 概率（收集數據時）
+old_log_prob = log π_old(aₜ | sₜ)
 
-trainer = PPOTrainer()
-trainer.train(total_timesteps=100000)
+# 新策略的 log 概率（當前網路）
+new_log_prob = log π_θ(aₜ | sₜ)
+
+# 概率比率
+ratio = exp(new_log_prob - old_log_prob) = π_θ(aₜ | sₜ) / π_old(aₜ | sₜ)
+```
+
+**直觀理解：**
+- `ratio > 1`: 新策略更傾向選擇這個動作
+- `ratio < 1`: 新策略更不傾向選擇這個動作
+- `ratio = 1`: 策略沒有改變
+
+#### 裁剪機制 (Clipping)
+
+```python
+# 設定裁剪範圍 ε = 0.2
+clip_range = 0.2
+
+# 原始目標
+surr1 = ratio * advantage
+
+# 裁剪後的目標
+surr2 = clip(ratio, 1-ε, 1+ε) * advantage
+      = clip(ratio, 0.8, 1.2) * advantage
+
+# 取較小值（保守更新）
+policy_loss = -min(surr1, surr2).mean()
+```
+
+**裁剪範圍視覺化：**
+
+```
+Advantage > 0 (好的動作):
+    ratio ∈ [0, 0.8]  → 不鼓勵降低概率（限制在0.8）
+    ratio ∈ [0.8, 1.2] → 正常更新
+    ratio ∈ [1.2, ∞]  → 不過度提高概率（限制在1.2）
+
+Advantage < 0 (壞的動作):
+    ratio ∈ [0, 0.8]  → 正常降低概率
+    ratio ∈ [0.8, 1.2] → 正常更新
+    ratio ∈ [1.2, ∞]  → 不鼓勵提高概率（限制在1.2）
+```
+
+**完整 Python 實現：**
+
+```python
+def ppo_policy_loss(states, actions, old_log_probs, advantages, clip_range=0.2):
+    # 前向傳播
+    logits, _ = self.net(states)
+    prob = torch.sigmoid(logits)
+    dist = torch.distributions.Bernoulli(probs=prob)
+    
+    # 新策略的 log 概率
+    new_log_probs = dist.log_prob(actions)
+    
+    # 概率比率
+    ratio = torch.exp(new_log_probs - old_log_probs)
+    
+    # 兩個目標
+    surr1 = ratio * advantages
+    surr2 = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * advantages
+    
+    # 取最小值並加負號（梯度上升 → 梯度下降）
+    policy_loss = -torch.min(surr1, surr2).mean()
+    
+    return policy_loss
 ```
 
 ---
 
-## ❓ 常見問題 (FAQ)
+### 2️⃣ 價值函數損失 (Value Loss)
 
-### Q1: 選擇了 .pt 檔案，但權重似乎沒有載入？
-
-**A**: 權重確實有載入！只是之前缺少視覺化回饋。現在啟動 AI 時會顯示：
+**均方誤差 (MSE)：**
 
 ```
-============================================================
-📥 開始載入檢查點
-============================================================
-🔄 正在載入檢查點: checkpoints/checkpoint_4934.pt
-   ✅ 模型權重已成功載入 (權重差異: 156.06)
-   ✅ 優化器狀態已載入
-✅ 檢查點載入成功！
-============================================================
+L_value = MSE(V(sₜ), Rₜ) = 1/N Σ (V(sₜ) - Rₜ)²
 ```
 
-如果仍有疑問，執行 `python diagnose_weight_loading.py` 進行診斷。
+**📉 價值損失 (Value Loss)：越低越好**
+- 代表 Critic 預測的準確度。
+- 損失越低，表示 Critic 對當前狀態價值的估計越接近真實回報。
 
-### Q2: 訓練到 700+ 分後崩潰，回檔後只有 200+ 分？
+**Python 實現：**
 
-**A**: 使用手動回檔工具恢復最佳模型：
-
-```powershell
-python rollback_tool.py
-# 選擇歷史最佳迭代次數（例如 4825）
+```python
+def value_loss(states, returns):
+    _, value = self.net(states)
+    loss = F.mse_loss(value, returns)
+    return loss
 ```
 
-**原因**：
-- 自動回檔只在**訓練過程中**檢測崩潰
-- 停止訓練後重啟，系統會載入最新（但可能是崩潰後）的檢查點
-- 需要手動回檔到歷史最佳檢查點
+**作用：** 訓練 Critic 更準確地預測未來累積獎勵。
 
-**預防措施**：
-- 系統現在會自動保存 `checkpoint_best.pt`
-- UI 優先載入最佳檢查點
-- 定期備份 `checkpoints/` 目錄
+---
 
-### Q3: 如何知道訓練是否在進步？
+### 3️⃣ 熵損失 (Entropy Loss)
 
-**A**: 觀察以下指標：
+**Bernoulli 分佈熵：**
 
-1. **平均分數**（mean_reward）- 整體水平
-2. **最高分數**（max_reward）- 潛力上限
-3. **最低分數**（min_reward）- 穩定性
-4. **迭代速度變慢** - 代表 AI 在進步！
-   - 早期：100 步/回合 → 每次迭代 327 個回合
-   - 後期：3000 步/回合 → 每次迭代 10 個回合
-   - 迭代變慢 = 回合變長 = AI 表現更好 ✅
-
-### Q4: 參數調整後訓練崩潰怎麼辦？
-
-**A**: 三種解決方案：
-
-1. **自動回檔**（訓練中）- 系統會自動檢測並回檔
-2. **手動回檔**（訓練停止後）- 使用 `rollback_tool.py`
-3. **檢查參數** - 查看 `training_config.json` 設定是否合理
-
-**常見錯誤參數**：
-- 學習率過高（> 0.001）
-- clip_eps 過大（> 0.3）
-- entropy 係數過低（< 0.01）
-
-### Q5: 如何清理舊的檢查點？
-
-**A**: 使用檢查點管理工具：
-
-```powershell
-python checkpoint_manager.py
-# 選擇選項 2: 清理低分檢查點
+```
+H(π) = -Σ [p·log(p) + (1-p)·log(1-p)]
 ```
 
-**安全機制**：
-- 保留最近 10 個檢查點（無論分數）
-- 保留 `checkpoint_best.pt`（最佳模型）
-- 刪除前會要求確認
-- 自動備份到 `checkpoints/backup/`
+其中 `p` 是跳躍概率。
 
----
+**📈 熵 (Entropy)：越高越好（初期）**
+- 代表策略的隨機性與探索能力。
+- 初期應保持較高（約 0.693 對於二元動作），以確保充分探索。
+- 後期隨著策略確定，熵會自然下降。
 
-## 📚 相關文檔
+**Python 實現：**
 
-- 📖 [學習率調度器完整指南](LR_SCHEDULER_GUIDE.md) - 6種調度器詳解與選擇建議
-- ⚙️ [參數調整指南](PARAMETER_TUNING_GUIDE.md) - 超參數調整最佳實踐
-- 🔧 [訓練故障排除](TRAINING_GUIDE.md) - 常見問題診斷與解決
-- 🖥️ [GPU 設置指南](GPU_SETUP.md) - CUDA 安裝與配置
-- 📊 [專案狀態報告](PROJECT_STATUS_REVIEW.md) - 開發進度追蹤
-
----
-
-## 🤝 貢獻
-
-歡迎貢獻！請遵循以下流程：
-
-1. Fork 本專案
-2. 創建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 開啟 Pull Request
-
-### 開發環境設置
-
-```powershell
-# 安裝開發依賴
-pip install -r requirements.txt
-pip install pre-commit
-
-# 設置 pre-commit hooks
-pre-commit install
-
-# 運行所有測試
-python -m pytest -v
-
-# 運行代碼檢查
-pre-commit run --all-files
+```python
+def entropy_loss(states):
+    logits, _ = self.net(states)
+    prob = torch.sigmoid(logits)
+    dist = torch.distributions.Bernoulli(probs=prob)
+    entropy = dist.entropy().mean()
+    return entropy
 ```
 
-### 代碼規範
-
-- 使用 **Black** 格式化 Python 代碼
-- 使用 **Ruff** 進行 Linting
-- 使用 **isort** 排序 imports
-- 所有新功能必須有單元測試
-- 提交前運行 `pytest` 確保測試通過
+**作用：** 
+- 高熵 = 策略更隨機 = 更多探索
+- 低熵 = 策略更確定 = 更多利用
+- 係數 `c₂ = 0.01` 微弱地鼓勵探索
 
 ---
-
-## 📄 授權
-
-本專案採用 **MIT License** 授權 - 詳見 [LICENSE](LICENSE) 文件
-
----
-
-## 🙏 致謝
-
-### 技術框架
-- [PyTorch](https://pytorch.org/) - 深度學習框架
-- [Pygame](https://www.pygame.org/) - 遊戲引擎
-- [TensorBoard](https://www.tensorflow.org/tensorboard) - 訓練視覺化
-
-### 理論基礎
-- **PPO 論文**: [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347) by Schulman et al. (2017)
-- **GAE 論文**: [High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438) by Schulman et al. (2016)
-- **Actor-Critic**: [Policy Gradient Methods for Reinforcement Learning with Function Approximation](https://papers.nips.cc/paper/1999/hash/464d828b85b0bed98e80ade0a5c43b0f-Abstract.html) by Sutton et al. (2000)
-
-### 靈感來源
-- [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) - 高質量 RL 庫
-- [CleanRL](https://github.com/vwxyzjn/cleanrl) - 簡潔的 RL 實現
-- [OpenAI Spinning Up](https://spinningup.openai.com/) - RL 教育資源
-
----
-
-## 📞 聯繫方式
-
-- **作者**: SmailDot
-- **GitHub**: [@SmailDot](https://github.com/SmailDot)
-- **專案連結**: [https://github.com/SmailDot/train_game](https://github.com/SmailDot/train_game)
-
----
-
-## 📈 專案統計
-
-![GitHub stars](https://img.shields.io/github/stars/SmailDot/train_game?style=social)
-![GitHub forks](https://img.shields.io/github/forks/SmailDot/train_game?style=social)
-![GitHub issues](https://img.shields.io/github/issues/SmailDot/train_game)
-![GitHub pull requests](https://img.shields.io/github/issues-pr/SmailDot/train_game)
-
----
-
-## 🗺️ 路線圖
-
-### ✅ 已完成
-- [x] PPO 演算法實現
-- [x] 多環境並行訓練
-- [x] 6 種學習率調度器
-- [x] 動態配置熱重載
-- [x] TensorBoard 整合
-- [x] 完整測試套件
-- [x] GPU/CPU 自動適配
-
-### 🚧 進行中
-- [ ] 改進神經網路可視化
-- [ ] 增強訓練分析工具
-
-### 📅 計劃中
-- [ ] 支持更多遊戲環境
-- [ ] 分佈式訓練支持
-- [ ] Web 介面儀表板
-- [ ] 模型壓縮與部署
-- [ ] 多語言文檔 (English, 日本語)
-
----
-
-<div align="center">
-
-**⭐ 如果這個專案對你有幫助，請給一個 Star！⭐**
-
-Made with ❤️ by SmailDot
-
-</div>
-
-````
 
