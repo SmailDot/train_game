@@ -18,7 +18,7 @@
 |:---:|:---:|
 | <video src="https://github.com/SmailDot/train_game/raw/main/train_video.mp4" controls width="100%"></video> | <video src="https://github.com/SmailDot/train_game/raw/main/play_video.mp4" controls width="100%"></video> |
 
-> **注意**: 如果影片無法直接播放，請點擊以下連結下載觀看：
+
 > - [訓練控制台影片](https://github.com/user-attachments/assets/6fbe458c-25ae-4a62-a5fb-54b667e95b78)
 > - [AI 遊玩影片 ](https://github.com/user-attachments/assets/57ccd118-6fee-42aa-9e4d-ed996e62a836)
 
