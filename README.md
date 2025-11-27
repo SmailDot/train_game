@@ -57,22 +57,23 @@
 
 ```mermaid
 graph TD
-    A[開始訓練 (Start)] --> B{檢查 Checkpoint?};
-    B -- 是 --> C[載入舊模型 & 統計數據];
-    B -- 否 --> D[初始化新模型];
-    C --> E[並行環境 (32 Envs)];
-    D --> E;
-    
-    subgraph Training_Loop [訓練迴圈]
-        E -->|收集軌跡 (Rollout)| F[經驗緩衝區 (RolloutBuffer)];
-        F -->|計算優勢 (GAE)| G[PPO 演算法核心];
-        G -->|計算 Loss| H[策略更新 (Policy Update)];
-        H -->|更新權重| I[神經網路 (Actor-Critic)];
+    A["開始訓練 (Start)"] --> B{"檢查 Checkpoint?"}
+    B -- "是" --> C["載入舊模型 & 統計數據"]
+    B -- "否" --> D["初始化新模型"]
+    C --> E["並行環境 (32 Envs)"]
+    D --> E
+
+    subgraph Training_Loop ["訓練迴圈"]
+        direction TB
+        E -- "收集軌跡 (Rollout)" --> F["經驗緩衝區 (RolloutBuffer)"]
+        F -- "計算優勢 (GAE)" --> G["PPO 演算法核心"]
+        G -- "計算 Loss" --> H["策略更新 (Policy Update)"]
+        H -- "更新權重" --> I["神經網路 (Actor-Critic)"]
     end
-    
-    I -->|定期評估| J[評估環境 (4 Envs)];
-    J -->|保存最佳模型| K[Best Model Checkpoint];
-    I -->|更新策略| E;
+
+    I -- "定期評估" --> J["評估環境 (4 Envs)"]
+    J -- "保存最佳模型" --> K["Best Model Checkpoint"]
+    I -- "更新策略" --> E
 ```
 
 ### 2. Breakdown 結構圖 (File Structure)
