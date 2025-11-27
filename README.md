@@ -13,14 +13,8 @@
 ---
 
 ## 🎥 演示 (Demo)
-
-| 訓練控制台 (Training Console) | AI 實際遊玩 (AI Gameplay) |
-|:---:|:---:|
-| <video src="https://github.com/SmailDot/train_game/raw/main/train_video.mp4" controls width="100%"></video> | <video src="https://github.com/SmailDot/train_game/raw/main/play_video.mp4" controls width="100%"></video> |
-
-> **注意**: 如果影片無法直接播放，請點擊以下連結下載觀看：
-> - [訓練控制台影片 (train_video.mp4)](https://github.com/SmailDot/train_game/raw/main/train_video.mp4)
-> - [AI 遊玩影片 (play_video.mp4)](https://github.com/SmailDot/train_game/raw/main/play_video.mp4)
+> - [訓練控制台影片](https://github.com/user-attachments/assets/6fbe458c-25ae-4a62-a5fb-54b667e95b78)
+> - [AI 遊玩影片 ](https://github.com/user-attachments/assets/57ccd118-6fee-42aa-9e4d-ed996e62a836)
 
 ---
 
@@ -57,50 +51,29 @@
 
 ## 📊 系統結構圖
 
-### 1. AOV 結構圖 (System Architecture)
+### AOV 結構圖 (System Architecture)
 
 這展示了數據在系統中的流動與處理順序：
 
 ```mermaid
 graph TD
-    A[開始訓練 (Start)] --> B{檢查 Checkpoint?};
-    B -- 是 --> C[載入舊模型 & 統計數據];
-    B -- 否 --> D[初始化新模型];
-    C --> E[並行環境 (32 Envs)];
-    D --> E;
-    
-    subgraph Training_Loop [訓練迴圈]
-        E -->|收集軌跡 (Rollout)| F[經驗緩衝區 (RolloutBuffer)];
-        F -->|計算優勢 (GAE)| G[PPO 演算法核心];
-        G -->|計算 Loss| H[策略更新 (Policy Update)];
-        H -->|更新權重| I[神經網路 (Actor-Critic)];
+    A["開始訓練 (Start)"] --> B{"檢查 Checkpoint?"}
+    B -- "是" --> C["載入舊模型 & 統計數據"]
+    B -- "否" --> D["初始化新模型"]
+    C --> E["並行環境 (32 Envs)"]
+    D --> E
+
+    subgraph Training_Loop ["訓練迴圈"]
+        direction TB
+        E -- "收集軌跡 (Rollout)" --> F["經驗緩衝區 (RolloutBuffer)"]
+        F -- "計算優勢 (GAE)" --> G["PPO 演算法核心"]
+        G -- "計算 Loss" --> H["策略更新 (Policy Update)"]
+        H -- "更新權重" --> I["神經網路 (Actor-Critic)"]
     end
-    
-    I -->|定期評估| J[評估環境 (4 Envs)];
-    J -->|保存最佳模型| K[Best Model Checkpoint];
-    I -->|更新策略| E;
-```
 
-### 2. Breakdown 結構圖 (File Structure)
-
-專案檔案模組化設計如下：
-
-```text
-Train_Game/
-├── game/                   # 🎮 遊戲核心模組
-│   ├── environment.py      # 物理引擎、獎勵函數、狀態定義
-│   ├── ui.py               # 畫面渲染、使用者介面
-│   └── vec_env.py          # 向量化環境包裝器
-├── rl/                     # 🤖 強化學習模組
-│   ├── train_sb3.py        # PPO 訓練主程式 (Entry Point)
-│   └── game2048_env.py     # Gymnasium 介面適配器
-├── agents/                 # 🧠 代理人模組
-│   ├── ppo_agent.py        # PPO 代理人類別
-│   └── networks.py         # 神經網路定義
-├── models/                 # 💾 模型存檔
-│   ├── best_model.zip      # 歷史最佳模型
-│   └── vec_normalize.pkl   # 狀態標準化統計數據
-└── logs/                   # 📈 訓練日誌 (TensorBoard)
+    I -- "定期評估" --> J["評估環境 (4 Envs)"]
+    J -- "保存最佳模型" --> K["Best Model Checkpoint"]
+    I -- "更新策略" --> E
 ```
 
 ---

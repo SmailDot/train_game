@@ -684,8 +684,14 @@ def main():
     print("-" * 60)
 
     try:
+        # 如果是載入模型，則不重置步數計數器，以保持 TensorBoard 曲線連續
+        reset_timesteps = not bool(args.load)
+
         model.learn(
-            total_timesteps=args.total_timesteps, callback=callbacks, progress_bar=True
+            total_timesteps=args.total_timesteps,
+            callback=callbacks,
+            progress_bar=True,
+            reset_num_timesteps=reset_timesteps,
         )
 
         # 保存最終模型
