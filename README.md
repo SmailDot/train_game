@@ -13,12 +13,6 @@
 ---
 
 ## 🎥 演示 (Demo)
-
-| 訓練控制台 (Training Console) | AI 實際遊玩 (AI Gameplay) |
-|:---:|:---:|
-| <video src="https://github.com/SmailDot/train_game/raw/main/train_video.mp4" controls width="100%"></video> | <video src="https://github.com/SmailDot/train_game/raw/main/play_video.mp4" controls width="100%"></video> |
-
-
 > - [訓練控制台影片](https://github.com/user-attachments/assets/6fbe458c-25ae-4a62-a5fb-54b667e95b78)
 > - [AI 遊玩影片 ](https://github.com/user-attachments/assets/57ccd118-6fee-42aa-9e4d-ed996e62a836)
 
