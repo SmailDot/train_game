@@ -39,12 +39,13 @@ class GameEnv:
     MaxGapHalf = 120.0
     MinGapHalf = 70.0
 
-    def __init__(self, seed=None, max_steps=None):
+    def __init__(self, seed=None, max_steps=None, frame_skip=4):
         self.rng = random.Random(seed)
         self.obstacles = []  # list of (x, gap_top, gap_bottom, passed) tuples
         # Optional step limit (None for unlimited play)
         self.max_steps = max_steps
         self.ball_radius = 12.0
+        self.frame_skip = frame_skip
         self.reset()
 
     def reset(self):  # noqa: C901
@@ -175,6 +176,36 @@ class GameEnv:
 
         returns: state, reward, done, info
         """
+        total_reward = 0.0
+        done = False
+        info = {}
+
+        # Frame Skip: Repeat action for n frames
+        for _ in range(self.frame_skip):
+            r, d = self._physics_step(action)
+            total_reward += r
+            if d:
+                done = True
+                break
+            # Only apply action on the first frame of the skip?
+            # Usually in Atari, action is repeated.
+            # But here, 'jump' is an impulse.
+            # If we repeat jump 4 times, it's 4 impulses.
+            # That might be too strong.
+            # Strategy: If action is 1 (jump), apply it only on the first frame.
+            # If action is 0 (do nothing), apply it on all frames.
+            # However, standard FrameSkip repeats the action.
+            # Let's stick to standard: repeat the action.
+            # But wait, if I hold 'jump' for 4 frames, I get 4 impulses?
+            # In Flappy Bird, you tap to jump.
+            # So action 1 should probably only happen once.
+            # Let's change logic: Action 1 is "Tap", Action 0 is "Fall".
+            # If I output 1, I tap once, then fall for the rest of the skip.
+            action = 0  # Reset action to 0 after first sub-step to simulate a "Tap"
+
+        return self._get_state(), total_reward, done, info
+
+    def _physics_step(self, action: int):
         # physics params
         gravity = 0.6
         jump_impulse = -7.0
@@ -257,24 +288,10 @@ class GameEnv:
             # Sharpened alignment reward: Quadratic falloff
             # Encourages being perfectly in the center much more than being "just okay"
             alignment_score = (1.0 - normalized_distance) ** 2
-            reward += self.AlignmentRewardScale * alignment_score
-
-            # Distance Reward: Encourage moving towards the goal (passing obstacles)
-            # Give a small reward for being close to the gap center vertically
-            # And implicitly, passing obstacles gives a large reward.
-            # Here we add a small reward based on horizontal progress
-            # If the obstacle is approaching (x decreasing), it means we are surviving.
-            # But to encourage "winning", we need to incentivize speed or progress.
-            # Since speed is constant, we incentivize "not dying" + "passing".
-
-            # Time Penalty: Encourage finishing quickly
-            # In a fixed-scroll game, time penalty might just lower total score.
-            # reward -= 0.01  # Removed as requested by user to reduce frustration
+            # Reduced Alignment Reward Scale from 0.2 to 0.05 to avoid reward hacking
+            reward += 0.05 * alignment_score
 
         reward -= self.VelocityPenaltyScale * (abs(self.vy) / self.MaxAbsVel)
-
-        # Survival reward: encourage staying alive
-        # reward += 0.01 # Removed to focus on winning/passing
 
         # Check collisions and pass-through events for all obstacles
         for obs in self.obstacles:
@@ -298,53 +315,47 @@ class GameEnv:
                     reward += 25.0  # Increased from 10.0 to prioritize survival/passing
                     self.passed_count += 1
 
-                    # Milestone reward: Encourage long survival
-                    if self.passed_count % 50 == 0:
-                        reward += 100.0
+        # Collision detection
+        if self.y < 0 or self.y > self.ScreenHeight:
+            done = True
+            reward -= 5.0
 
-                    # High Speed Bonus: Extra reward for surviving in high speed zones
-                    if current_scroll > 3.0:
-                        reward += 5.0  # Bonus for handling high speed
-                    if current_scroll > 3.8:
-                        reward += 10.0  # Super bonus for max speed survival
+        for obs in self.obstacles:
+            ob_x, gap_top, gap_bottom = obs[0], obs[1], obs[2]
+            # Simple AABB collision
+            # Player is at x=0, width=ball_radius*2
+            # Obstacle is at ob_x, width=ObstacleWidth
 
-                    # Check for winning condition
-                    if self.episode_score + reward >= self.WinningScore:
-                        reward += 1000.0  # Huge reward for winning
-                        win = True
-                        done = True
+            # Check horizontal overlap
+            # Player x range: [-ball_radius, ball_radius]
+            # Obstacle x range: [ob_x, ob_x + obstacle_width]
 
-            # Check collision: obstacle rectangle overlaps with球體
-            horizontally_overlap = (ob_x - collision_padding) < ball_right and (
-                obs_right_edge + collision_padding
-            ) > ball_left
-            if horizontally_overlap:
+            if (ball_right > ob_x + collision_padding) and (
+                ball_left < ob_x + obstacle_width - collision_padding
+            ):
+                # Check vertical overlap (collision with top or bottom pipe)
                 ball_top = self.y - ball_radius
                 ball_bottom = self.y + ball_radius
 
-                if ball_top < gap_top or ball_bottom > gap_bottom:
-                    reward -= 5.0
+                if (ball_top < gap_top + collision_padding) or (
+                    ball_bottom > gap_bottom - collision_padding
+                ):
                     done = True
+                    reward -= 5.0
                     break
 
-        # collision / out-of-bounds (top/bottom)
-        # hitting ceiling or floor is failure - 球體完全碰到邊界
-        if self.y - ball_radius < 0 or self.y + ball_radius > self.ScreenHeight:
-            reward -= 5.0
-            done = True
-
-        # accumulate episode score
-        self.episode_score += float(reward)
-
-        # 檢查勝利條件：達到 WinningScore 分即通關
-        # Note: We already checked this inside the obstacle passing logic,
-        # but keeping it here as a safety net for other score sources.
-        if not win and self.episode_score >= self.WinningScore:
-            reward += 1000.0  # 給予巨大獎勵
-            done = True
+        # Check win condition
+        if self.episode_score + reward >= self.WinningScore:
             win = True
+            done = True
+            reward += 1000.0
 
+        self.episode_score += reward
         self.t += 1
+        if self.max_steps and self.t >= self.max_steps:
+            done = True
+
+        return reward, done
         if self.max_steps is not None and self.t >= self.max_steps:
             done = True
 

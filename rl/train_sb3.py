@@ -29,7 +29,12 @@ from stable_baselines3.common.logger import (
     Logger,
     TensorBoardOutputFormat,
 )
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+    VecMonitor,
+    VecNormalize,
+)
 
 # 添加項目根目錄到路徑
 project_root = Path(__file__).parent.parent
@@ -435,14 +440,20 @@ def create_envs(
     Returns:
         環境實例
     """
-    print(f"🚀 創建 {n_envs} 個並行環境...")
 
     env_kwargs = {}
     if render_mode:
         env_kwargs["render_mode"] = render_mode
+        # 如果啟用渲染，強制使用單一環境與 DummyVecEnv 以避免視窗衝突與崩潰
+        n_envs = 1
+        vec_env_cls = DummyVecEnv
+        print(
+            "⚠️ 啟用渲染模式：強制將環境數量設為 1 並使用 DummyVecEnv 以避免視窗衝突。"
+        )
+    else:
+        vec_env_cls = SubprocVecEnv if n_envs > 1 else DummyVecEnv
 
-    # 如果啟用渲染，強制使用 SubprocVecEnv 以避免視窗衝突
-    vec_env_cls = SubprocVecEnv if render_mode == "human" and n_envs > 1 else None
+    print(f"🚀 創建 {n_envs} 個並行環境 (Class: {vec_env_cls.__name__})...")
 
     vec_env = make_vec_env(
         Game2048Env,
@@ -625,14 +636,14 @@ def get_training_config(target: str = "6666") -> dict:
         "hidden_dim": 256,
         # 學習參數 (針對長期目標優化)
         "learning_rate": 1e-4,
-        "gamma": 0.99,
+        "gamma": 0.98,  # 稍微降低 gamma，讓 AI 更專注於眼前的閃避 (0.99 -> 0.98)
         "gae_lambda": 0.95,
         # PPO 參數
         "clip_range": 0.1,
         "ent_coef": 0.005,
         "vf_coef": 1.0,
         # 訓練效率
-        "n_steps": 1024,
+        "n_steps": 2048,  # 恢復標準步數
         "batch_size": 2048,
         "n_epochs": 10,
         "max_grad_norm": 0.3,
@@ -649,10 +660,10 @@ def get_training_config(target: str = "6666") -> dict:
                 "learning_rate": (2e-4, 5e-5),  # 稍微提高初始學習率
                 "ent_coef": 0.01,
                 "vf_coef": 1.0,
-                "n_steps": 4096,  # 增加 n_steps 讓每次更新看到更長軌跡 (2048 -> 4096)
-                "batch_size": 8192,  # 增加 batch_size (4096 -> 8192)
+                "n_steps": 2048,
+                "batch_size": 4096,
                 "n_epochs": 10,
-                "hidden_dim": 512,  # 增加網絡容量 (256 -> 512)
+                "hidden_dim": 256,  # 縮小網絡容量 (512 -> 256) 以避免過擬合並加快收斂
             }
         )
         return config_6666
@@ -849,7 +860,7 @@ def main():
         model.learn(
             total_timesteps=args.total_timesteps,
             callback=callbacks,
-            progress_bar=False,
+            progress_bar=True,
             reset_num_timesteps=reset_timesteps,
         )
 
