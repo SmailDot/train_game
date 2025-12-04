@@ -58,7 +58,7 @@ KEY_TRANSLATIONS = {
     "env/alignment_score": "env/alignment_score(對齊分數)",
     "env/passed_count": "env/passed_count(通過障礙物數量)",
     "env/scroll_speed": "env/scroll_speed(目前捲動速度)",
-    "env/win_rate": "env/win_rate(通關次數)",
+    "env/win_rate": "env/win_rate(通關率)",
     # Rollout
     "rollout/ep_len_mean": "rollout/ep_len_mean(平均回合長度)",
     "rollout/ep_rew_mean": "rollout/ep_rew_mean(平均回合獎勵)",
@@ -278,11 +278,18 @@ class WinCallback(BaseCallback):
 class EpisodeStatsCallback(BaseCallback):
     """Record custom environment metrics (e.g., passes, scroll speed)."""
 
-    def __init__(self, prefix: str = "env", verbose: int = 0, window_size: int = 100):
+    def __init__(
+        self,
+        prefix: str = "env",
+        verbose: int = 0,
+        window_size: int = 100,
+        target_win_rate: Optional[float] = None,
+    ):
         super().__init__(verbose)
         self.prefix = prefix
         self.win_buffer = deque(maxlen=window_size)
         self.pass_buffer = deque(maxlen=window_size)
+        self.target_win_rate = target_win_rate
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos")
@@ -302,7 +309,21 @@ class EpisodeStatsCallback(BaseCallback):
 
         # Record the mean of the buffers (Rolling Average)
         if self.win_buffer:
-            self.logger.record(f"{self.prefix}/win_rate", np.mean(self.win_buffer))
+            current_win_rate = np.mean(self.win_buffer)
+            self.logger.record(f"{self.prefix}/win_rate", current_win_rate)
+
+            # Check for target win rate stop condition
+            if (
+                self.target_win_rate is not None
+                and len(self.win_buffer) >= self.win_buffer.maxlen
+                and current_win_rate >= self.target_win_rate
+            ):
+                if self.verbose > 0:
+                    print(
+                        f"🎉 達成目標通關率！當前: {current_win_rate:.2f} "
+                        f">= 目標: {self.target_win_rate:.2f}"
+                    )
+                return False  # Stop training
 
         if self.pass_buffer:
             self.logger.record(f"{self.prefix}/passed_count", np.mean(self.pass_buffer))
@@ -506,6 +527,7 @@ def create_callbacks(
     seed: int = 42,
     adaptive_entropy: bool = True,
     curriculum_phases: Optional[List[Dict[str, dict]]] = None,
+    target_win_rate: Optional[float] = None,
 ):
     """建立訓練/評估所需的回調。"""
 
@@ -551,7 +573,7 @@ def create_callbacks(
     callbacks.append(eval_callback)
 
     callbacks.append(WinCallback(verbose=1))
-    callbacks.append(EpisodeStatsCallback(verbose=0))
+    callbacks.append(EpisodeStatsCallback(verbose=0, target_win_rate=target_win_rate))
     if curriculum_phases:
         callbacks.append(CurriculumCallback(curriculum_phases, verbose=1))
     if adaptive_entropy:
@@ -756,6 +778,11 @@ def main():
         action="store_true",
         help="啟用渲染模式 (注意：這會開啟大量視窗，僅用於調試)",
     )
+    parser.add_argument(
+        "--target-win-rate",
+        type=float,
+        help="當通關率達到此值時停止訓練 (例如 0.9)",
+    )
 
     args = parser.parse_args()
 
@@ -847,6 +874,7 @@ def main():
         seed=args.seed,
         adaptive_entropy=args.adaptive_entropy,
         curriculum_phases=curriculum_phases,
+        target_win_rate=args.target_win_rate,
     )
 
     # 開始訓練！

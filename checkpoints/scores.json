@@ -1,6 +1,30 @@
 [
   {
     "name": "SB3-Replay",
+    "score": 1800,
+    "iteration": null,
+    "note": "SB3 模型 best_model.zip"
+  },
+  {
+    "name": "SB3-Replay",
+    "score": 1800,
+    "iteration": null,
+    "note": "SB3 模型 best_model.zip"
+  },
+  {
+    "name": "SB3-Replay",
+    "score": 1800,
+    "iteration": null,
+    "note": "SB3 模型 best_model.zip"
+  },
+  {
+    "name": "人類",
+    "score": 209,
+    "iteration": null,
+    "note": null
+  },
+  {
+    "name": "SB3-Replay",
     "score": 93,
     "iteration": null,
     "note": "SB3 模型 best_model.zip"
@@ -20,6 +44,12 @@
   {
     "name": "人類",
     "score": 32,
+    "iteration": null,
+    "note": null
+  },
+  {
+    "name": "人類",
+    "score": 29,
     "iteration": null,
     "note": null
   },
@@ -124,6 +154,12 @@
     "score": -3,
     "iteration": null,
     "note": "SB3 模型 best_model.zip"
+  },
+  {
+    "name": "人類",
+    "score": -3,
+    "iteration": null,
+    "note": null
   },
   {
     "name": "SB3-Replay",

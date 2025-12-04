@@ -1,0 +1,12 @@
+{
+  "algorithms": {
+    "ppo": {
+      "iteration": 10,
+      "episodes": 0,
+      "viewer_round": 0
+    }
+  },
+  "vector_envs": 16,
+  "active": "ppo",
+  "saved_at": "2025-11-21T09:16:22.317477Z"
+}

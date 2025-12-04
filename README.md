@@ -12,6 +12,13 @@
 
 ---
 
+## 🏆 最終成果 (v5 Final)
+- **通關率**: **99%** (100 場測試中獲勝 99 場)
+- **最高分**: **7647** (平均獎勵)
+- **最佳模型**: `models/ppo_game2048_6666_final.zip`
+
+---
+
 ## 🎥 演示 (Demo)
 > - [AI 遊玩影片 ](https://github.com/user-attachments/assets/57ccd118-6fee-42aa-9e4d-ed996e62a836)
 > - [訓練日誌 GIF (v5 Refined)]
@@ -58,23 +65,144 @@
 
 ```mermaid
 graph TD
-    A["開始訓練 (Start)"] --> B{"檢查 Checkpoint?"}
-    B -- "是" --> C["載入舊模型 & 統計數據"]
-    B -- "否" --> D["初始化新模型"]
-    C --> E["並行環境 (32 Envs)"]
-    D --> E
+    %% === Start & Init ===
+    Start(["🚀 開始訓練 (Start)"]) --> CheckCkp{"📂 有存檔嗎？"}
+    
+    CheckCkp -- "有 (Auto-Resume)" --> Load["📥 讀檔：接著上次的進度練<br>(Load Checkpoint)"]
+    CheckCkp -- "沒有" --> Init["🆕 創一個全新的 AI<br>(Init New Policy)"]
+    
+    Load --> Envs
+    Init --> Envs
 
-    subgraph Training_Loop ["訓練迴圈"]
+    %% === Environment Setup ===
+    subgraph EnvSetup ["⚙️ 環境準備 (Environment Setup)"]
         direction TB
-        E -- "收集軌跡 (Rollout)" --> F["經驗緩衝區 (RolloutBuffer)"]
-        F -- "計算優勢 (GAE)" --> G["PPO 演算法核心"]
-        G -- "計算 Loss" --> H["策略更新 (Policy Update)"]
-        H -- "更新權重" --> I["神經網路 (Actor-Critic)"]
+        Envs["🖥️ 開 32 個遊戲視窗 (Parallel Envs)"]
+        Envs --> Wrap1["未來視：了解4張圖的路徑<br>(FrameSkip)"]
+        Wrap1 --> Wrap2["濾鏡：把數據整理成 AI 好懂的樣子<br>(VecNormalize)"]
     end
 
-    I -- "定期評估" --> J["評估環境 (4 Envs)"]
-    J -- "保存最佳模型" --> K["Best Model Checkpoint"]
-    I -- "更新策略" --> E
+    Wrap2 --> Rollout
+
+    %% === Training Loop ===
+    subgraph TrainLoop ["🔄 訓練迴圈 (Training Loop)"]
+        direction TB
+        
+        %% Step 1: Interaction
+        Rollout["🎮 讓 AI 實際上場玩 (Rollout)"]
+        Rollout -- "看到 7 種數據資訊" --> Agent["AI 決定怎麼走 (Actor)"]
+        Agent -- "按下按鍵" --> Step["遊戲畫面動一下 (Physics Step)"]
+        
+        %% Step 2: Feedback
+        Step -- "回傳結果 " --> Buffer["📝 寫進「紀錄日誌」<br>(RolloutBuffer)"]
+        
+        %% Step 3: Optimization
+        Buffer -- "日誌寫滿了嗎？" --> Update{"開始特訓？"}
+        Update -- "還沒" --> Rollout
+        Update -- "滿了" --> Algo["🧠 PPO 核心大腦"]
+        
+        Algo -- "算算剛才那樣走好不好，是否還有需要優化的參數" --> Loss["📉 計算跟標準答案差多少<br>(Loss Calculation)"]
+        Loss -- "自適應調整 (Backprop)" --> Opt["⚖️ 調整大腦參數<br>(Update Weights)"]
+    end
+
+    Opt --> EvalCheck{"⏱️ 該隨堂考了嗎？<br>(Periodic Eval)"}
+    EvalCheck -- "還沒" --> Rollout
+
+    %% === Evaluation & Save ===
+    subgraph EvalLoop ["📊 考試與存檔 (Evaluation)"]
+        direction TB
+        EvalCheck -- "該考了" --> Test["🧪 隨堂測驗 (4 個考場)"]
+        Test --> Metrics["📈 結算成績單"]
+        
+        Metrics --> Log["📝 紀錄到 TensorBoard"]
+        Log --> SaveBest{"🏆 破紀錄了嗎？"}
+        
+        SaveBest -- "破紀錄了" --> Save1["💾 把最強的存起來"]
+        SaveBest -- "沒破" --> GoalCheck
+        Save1 --> GoalCheck
+        
+        GoalCheck{"🎯 勝率 > 90%？"}
+    end
+
+    GoalCheck -- "還沒 (繼續練)" --> Rollout
+    GoalCheck -- "達標 (收工)" --> Stop(["🎉 訓練畢業 (Success)"])
+```
+
+### BREAK DOWN (系統分析圖)
+
+```mermaid
+graph TD
+    %% === L1 Core ===
+    Core("🎮 深度強化學習訓練平台<br>(Train Game AI - v5 Final)")
+
+    %% === L2 Main Branches ===
+    Core --> EnvBlock
+    Core --> AgentBlock
+    Core --> SysBlock
+
+    %% === Branch 1: Environment ===
+    subgraph EnvBlock ["📍 遊戲環境 (Game Environment)"]
+        direction TB
+        Env("環境核心") --> Obs("觀察空間<br>(Observation)")
+        Env --> Rew("獎勵重塑<br>(Reward Shaping)")
+        Env --> Act("動作空間<br>(Action)")
+        
+        %% Obs Details
+      Obs --> ObsList["7維輸入向量:<br>1. y (玩家目前高度)<br>2. vy (垂直速度)<br>3. x_obs (距下一個障礙物的水平距離)<br>4. gap_top (縫隙上緣的 Y 座標)<br>5. gap_bottom (縫隙下緣的 Y 座標)<br>6. rel_top (距縫隙上緣的相對距離)<br>7. rel_bottom (距縫隙下緣的相對距離)"]
+        Obs --> Norm[" VecNormalize<br>(數值標準化)"]
+
+        %% Reward Details (Updated for v5)
+        Rew --> RA("成就 (Achievement)")
+        RA --> RA1["通關 (+1000)"]
+        RA --> RA2["保持存活(+0.01)"]
+        RA --> RA3["通過障礙 (+5)"]
+
+        Rew --> RG("引導 (Guidance)")
+        RG --> RG1["Survival (存活獎勵)<br>(核心驅動力)"]
+        RG --> RG2["Alignment (中心對齊)<br>(低權重輔助)"]
+
+        Rew --> RP("懲罰 (Penalty)")
+        RP --> RP1["Death (-5)<br>(撞牆/出界)"]
+        %% 移除了 Time Cost，因為 v5 不再使用
+
+        %% Action Details
+        Act --> ActList["Discrete(2):<br>0: 不跳 / 1: 跳躍"]
+    end
+
+    %% === Branch 2: Agent ===
+    subgraph AgentBlock ["🧠 PPO 決策模型 (Agent)"]
+        direction TB
+        Agent("PPO 模型") --> Net("神經網路 (v5)")
+        Agent --> Opt("優化機制")
+
+        %% Network Details (Updated to 256)
+        Net --> N1["Input Layer (7 Nodes)"]
+        Net --> N2["Hidden 1 (256, ReLU)"]
+        Net --> N3["Hidden 2 (256, ReLU)"]
+        Net --> N4["Output Layer (2 Nodes)"]
+
+        %% Optimization Details
+        Opt --> O1["Clip Loss<br>(限制更新幅度)"]
+        Opt --> O2["Value Loss<br>(局勢判斷)"]
+        Opt --> O3["Entropy Loss<br>(探索好奇心)"]
+    end
+
+    %% === Branch 3: System ===
+    subgraph SysBlock ["⚙️ 訓練系統 (System)"]
+        direction TB
+        Sys("系統架構") --> Comp("運算配置")
+        Sys --> Tools("輔助工具")
+
+        %% Computation
+        Comp --> C1["32 Parallel Envs"]
+        Comp --> C2["FrameSkip: 4<br>(決策跳幀)"]
+        Comp --> C3["Total Timesteps<br>(20M+)"]
+
+        %% Tools
+        Tools --> T1["Auto-Resume<br>(自動續訓)"]
+        Tools --> T2["TensorBoard<br>(數據監控)"]
+        Tools --> T3["Target Win Rate<br>(自動停損)"]
+    end
 ```
 
 ### BREAK DOWN (系統分析圖)
@@ -184,13 +312,13 @@ AI 並非直接看像素 (Pixels)，而是接收一個 **7 維的正規化向量
 | :--- | :--- | :--- |
 | **通關 (Win)** | **+1000.0** | 鼓勵 AI 追求最終勝利 (6666分)，而不僅僅是生存。 |
 | **通過障礙** | **+5.0** | 給予階段性成就感，引導 AI 穿越縫隙。 |
-| **位置對齊** | +0.08 (max) | 引導 AI 盡量保持在縫隙中央，減少碰撞風險。 |
-| **時間懲罰** | **-0.01 / step** | 迫使 AI 不要猶豫，雖然卷軸是固定的，但這能減少無效操作。 |
+| **位置對齊** | +0.05 (max) | 引導 AI 盡量保持在縫隙中央，減少碰撞風險。 |
+| **存活獎勵** | **+0.01 / step** | 鼓勵 AI 活得越久越好 (取代舊版的時間懲罰)。 |
 | **碰撞/出界** | **-5.0** | 強烈懲罰死亡，讓 AI 學會避開危險。 |
 
 ### 4. 神經網路架構
 - **架構**：MLP (多層感知機)
-- **規模**：`[512, 512]` (兩層隱藏層，每層 512 個神經元)
+- **規模**：`[256, 256]` (兩層隱藏層，每層 256 個神經元)
 - **激活函數**：ReLU
 
 ---
@@ -290,4 +418,5 @@ PPO 是目前最流行的深度強化學習演算法之一，由 OpenAI 提出�
 | **轉型期 (v3)** | **Stable-Baselines3-PPO** | `[256, 256]` | ~1000 分 | **+** SB3 框架 (GPU 加速/標準化)<br>**+** Replay 重播機制 (視覺驗證)<br>**-** 移除自製 PPO (升級架構)<br>**-** 移除極端值紀錄 (不相容)<br>**-** 移除 NN 視覺化 (不相容) | 雖然 GPU 訓練速度大幅提升，但 **Headless 模式**無法看到遊玩過程；且移除了記憶機制後，AI 容易陷入局部最佳解。 | **升級至 SB3 PPO** 獲得更穩定的梯度更新；開發 **"Replay 重播機制"** 進行視覺化驗證。 |
 | **現行版 (v4)** | **Stable-Baselines3-PPO** | `[512, 512]` | **3000~4000+ 分** | **+** 中心對齊獎勵 (提升精準度)<br>**+** 速度/里程碑獎勵 (鼓勵推進)<br>**+** **存活時間獎勵 (堅持)**<br>**+** 課程學習 (動態難度)<br>**+** **透視機制 (預判路徑)**<br>**-** 移除扣分制 (避免消極)<br>**-** 移除固定通過獎勵 (改為連續) | 隨著速度變快，AI 反應不及；舊獎勵機制限制了上限。 | **Reward Shaping**：<br>1. **透視機制**：讓 AI 看到下一個障礙物，提前規劃路徑。<br>2. **引導驅動**：移除扣分，改為越靠近中心分數越高。 |
 | **最新版 (v5)** | **SB3-PPO + FrameSkip** | `[256, 256]` | **目標通關** | **+** **Frame Skip (4 frames)** (降低決策頻率)<br>**+** **縮小網路規模** (避免過擬合)<br>**-** 移除速度獎勵 (避免干擾)<br>**-** 降低對齊獎勵 (避免動作僵硬) | 訓練五千萬步仍未收斂，AI 無法判斷自身動量，導致在高速狀態下反應不及。 | **Frame Skip** 讓 AI 決策更有效率；**縮小網路** 加快收斂速度。 |
+| **最終版 (v5 Final)** | **SB3-PPO + Auto-Stop** | `[256, 256]` | **通關 (99% 勝率)** | **+** **Target Win Rate** (自動停損)<br>**+** **Death Interrupt** (死亡中斷)<br>**+** **Linear Schedule** (線性衰減) | 訓練後期震盪，無法穩定通關。 | **Shock Therapy** (高熵探索) + **Stabilization** (低熵收斂) 兩階段訓練法。 |
 

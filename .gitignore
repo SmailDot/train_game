@@ -3,3 +3,6 @@ __pycache__/
 checkpoints/tb/
 checkpoints/*.pth
 checkpoints/*.pt
+
+checkpoints/ppo_game2048_*_steps.zip
+checkpoints/ppo_game2048_vecnormalize_*_steps.pkl
