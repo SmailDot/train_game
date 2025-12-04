@@ -182,8 +182,10 @@ class GameEnv:
 
         # Frame Skip: Repeat action for n frames
         for _ in range(self.frame_skip):
-            r, d = self._physics_step(action)
+            r, d, w = self._physics_step(action)
             total_reward += r
+            if w:
+                info["win"] = True
             if d:
                 done = True
                 break
@@ -203,6 +205,7 @@ class GameEnv:
             # If I output 1, I tap once, then fall for the rest of the skip.
             action = 0  # Reset action to 0 after first sub-step to simulate a "Tap"
 
+        info["passed_count"] = self.passed_count
         return self._get_state(), total_reward, done, info
 
     def _physics_step(self, action: int):
@@ -355,7 +358,7 @@ class GameEnv:
         if self.max_steps and self.t >= self.max_steps:
             done = True
 
-        return reward, done
+        return reward, done, win
         if self.max_steps is not None and self.t >= self.max_steps:
             done = True
 

@@ -563,12 +563,12 @@ class GameUI:
         status_panel_width = max(320, int(width * 0.25))
 
         # 根據模式動態調整遊戲區域
-        if self.mode == "AI" and self.running:
-            # AI 訓練時，遊戲區域從最左邊開始
+        if self.running:
+            # 遊戲進行時，隱藏左側面板，遊戲區域從最左邊開始
             play_start_x = 0
             play_width = max(400, width - status_panel_width)
         else:
-            # 其他模式，遊戲區域從演算法面板右側開始
+            # 選單模式，顯示演算法面板
             play_start_x = algo_panel_width
             play_width = max(400, width - algo_panel_width - status_panel_width)
 
@@ -1429,9 +1429,12 @@ class GameUI:
         self._update_layout(self.width, self.height)
 
         # Use a fixed seed for Replay to ensure consistency
-        # This ensures that every time the user clicks Replay, they see the exact same level layout.
+        # This ensures that every time the user clicks Replay, they see the same layout.
         if initial_state is None:
-            self.env.game.rng.seed(42)  # Fixed seed for consistency
+            if hasattr(self.env, "game"):
+                self.env.game.rng.seed(42)
+            else:
+                self.env.rng.seed(42)
             state = self.env.reset()
         else:
             state = initial_state
@@ -1469,6 +1472,7 @@ class GameUI:
                 self.agent = None
                 self.agent_ready = False
                 self.ai_status = "idle"
+                self._update_layout(self.width, self.height)
                 return self.env.reset()
             return None
 
@@ -1487,6 +1491,7 @@ class GameUI:
                 self.agent = None
                 self.agent_ready = False
                 self.ai_status = "idle"
+                self._update_layout(self.width, self.height)
                 return self.env.reset()
             return None
 
@@ -1537,6 +1542,7 @@ class GameUI:
             self.game_over = False
             self.paused = False
             self.ai_status = "idle"
+            self._update_layout(self.width, self.height)
             # Reset environment and return the new state
             return self.env.reset()
         if not self.running and self.btn_ai.collidepoint(pos):
@@ -1611,6 +1617,7 @@ class GameUI:
         self.agent_ready = False
         self.btn_save = None
         self.current_score = 0.0
+        self._update_layout(self.width, self.height)
 
         try:
             new_state = self.env.reset()
@@ -1680,6 +1687,7 @@ class GameUI:
             except Exception:
                 pass
             self.mode = "Menu"
+            self._update_layout(self.width, self.height)
 
         self.agent = None
 
@@ -2337,8 +2345,8 @@ class GameUI:
 
             # render
             self.screen.fill(self.BG_COLOR)
-            # AI 訓練模式下不顯示演算法面板
-            if self.mode != "AI":
+            # 只有在非遊戲進行中才顯示演算法面板
+            if not self.running:
                 self._draw_algorithm_panel()
             self.draw_playfield(s)
             self.draw_panel()

@@ -278,35 +278,37 @@ class WinCallback(BaseCallback):
 class EpisodeStatsCallback(BaseCallback):
     """Record custom environment metrics (e.g., passes, scroll speed)."""
 
-    def __init__(self, prefix: str = "env", verbose: int = 0):
+    def __init__(self, prefix: str = "env", verbose: int = 0, window_size: int = 100):
         super().__init__(verbose)
         self.prefix = prefix
+        self.win_buffer = deque(maxlen=window_size)
+        self.pass_buffer = deque(maxlen=window_size)
 
     def _on_step(self) -> bool:
-        infos = self.locals.get("infos") if hasattr(self, "locals") else None
-        if not infos:
+        infos = self.locals.get("infos")
+        dones = self.locals.get("dones")
+
+        if not infos or dones is None:
             return True
 
-        metrics = {}
-        for info in infos:
-            if not isinstance(info, dict):
-                continue
-            for key in ("passed_count", "scroll_speed", "alignment_score"):
-                if key in info:
-                    metrics.setdefault(key, []).append(info[key])
+        for idx, done in enumerate(dones):
+            if done:
+                info = infos[idx]
+                # Buffer the win status (True/False -> 1.0/0.0)
+                self.win_buffer.append(float(info.get("win", False)))
 
-            # Track binary win flags to compute win rate during training
-            if "win" in info:
-                metrics.setdefault("win", []).append(float(bool(info["win"])))
+                if "passed_count" in info:
+                    self.pass_buffer.append(float(info["passed_count"]))
 
-        for key, values in metrics.items():
-            if not values:
-                continue
+        # Record the mean of the buffers (Rolling Average)
+        if self.win_buffer:
+            self.logger.record(f"{self.prefix}/win_rate", np.mean(self.win_buffer))
 
-            if key == "win":
-                self.logger.record(f"{self.prefix}/win_rate", float(np.mean(values)))
-            else:
-                self.logger.record(f"{self.prefix}/{key}", float(np.mean(values)))
+        if self.pass_buffer:
+            self.logger.record(f"{self.prefix}/passed_count", np.mean(self.pass_buffer))
+
+        # Optional: Log instantaneous metrics for debugging if needed,
+        # but for TensorBoard, the rolling average is much better.
 
         return True
 
