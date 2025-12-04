@@ -20,7 +20,8 @@
 ---
 
 ## 🎥 演示 (Demo)
-> - [AI 遊玩影片 ](https://github.com/user-attachments/assets/57ccd118-6fee-42aa-9e4d-ed996e62a836)
+> - [AI 遊玩影片 ]
+> - ![Image](https://github.com/user-attachments/assets/2bf50643-3baa-4ddf-8111-f9254715b365)
 > - [訓練日誌 GIF (v5 Refined)]
 > - ![Image](https://github.com/user-attachments/assets/4036db4c-2629-4798-8cce-e36a806ca1d5)
 
