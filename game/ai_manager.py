@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from game.environment import GameEnv
-from game.training_window import TrainingWindow
+
+# from game.training_window import TrainingWindow
 
 
 @dataclass
@@ -26,7 +27,7 @@ class AlgorithmState:
     descriptor: AlgorithmDescriptor
     trainer: Optional[object] = None
     agent: Optional[object] = None
-    training_window: Optional[TrainingWindow] = None
+    # training_window: Optional[TrainingWindow] = None
     trainer_thread: Optional[threading.Thread] = None
     stop_event: Optional[threading.Event] = None
     status: str = "idle"
@@ -87,9 +88,9 @@ class AlgorithmManager:
             slot.stop_event.set()
         if wait and slot.trainer_thread is not None:
             slot.trainer_thread.join(timeout=5.0)
-        if slot.training_window is not None:
-            slot.training_window.stop()
-            slot.training_window = None
+        # if slot.training_window is not None:
+        #     slot.training_window.stop()
+        #     slot.training_window = None
         slot.trainer_thread = None
         slot.stop_event = None
         slot.trainer = None
@@ -168,9 +169,9 @@ class AlgorithmManager:
         slot.trainer = trainer
         slot.agent_ready = True
         slot.status = "training"
-        title = slot.descriptor.window_title or f"{slot.descriptor.name} 訓練視窗"
-        slot.training_window = slot.training_window or TrainingWindow(title=title)
-        slot.training_window.start()
+        # title = slot.descriptor.window_title or f"{slot.descriptor.name} 訓練視窗"
+        # slot.training_window = slot.training_window or TrainingWindow(title=title)
+        # slot.training_window.start()
         stop_event = threading.Event()
         slot.stop_event = stop_event
 

@@ -9,10 +9,12 @@ from typing import Any, Dict, Optional
 import pygame
 
 from agents.ppo_agent import PPOAgent
-from agents.pytorch_trainer import PPOTrainer
-from game.ai_manager import AlgorithmDescriptor, AlgorithmManager, AlgorithmState
+
+# from agents.pytorch_trainer import PPOTrainer
+from game.ai_manager import AlgorithmManager, AlgorithmState
 from game.environment import GameEnv
-from game.training_dialog import TrainingDialog
+
+# from game.training_dialog import TrainingDialog
 
 try:
     from agents.sb3_replay_agent import SB3ReplayAgent
@@ -214,7 +216,7 @@ class GameUI:
         import torch
 
         use_cuda = torch.cuda.is_available()
-        device_str = "cuda" if use_cuda else "cpu"
+        # device_str = "cuda" if use_cuda else "cpu"
         if use_cuda:
             print(f"✅ 檢測到 GPU: {torch.cuda.get_device_name(0)}")
             print(f"   CUDA 版本: {torch.version.cuda}")
@@ -222,24 +224,25 @@ class GameUI:
             print("⚠️  未檢測到 GPU，使用 CPU 訓練")
 
         # 根據 training_config 設定參數
-        from utils.training_config import TrainingConfig
+        # from utils.training_config import TrainingConfig
 
-        config = TrainingConfig(use_gpu=use_cuda)
-        ppo_kwargs = config.get_ppo_kwargs()
+        # config = TrainingConfig(use_gpu=use_cuda)
+        # ppo_kwargs = config.get_ppo_kwargs()
 
-        descriptors = [
-            AlgorithmDescriptor(
-                key="ppo",
-                name="PPO",
-                trainer_factory=lambda: PPOTrainer(**ppo_kwargs),
-                use_vector_envs=True,
-                vector_envs=config.get_recommended_n_envs(),
-                hotkey=pygame.K_1,
-                action_label="1",
-                color=(120, 200, 255),
-                window_title=f"PPO 訓練視窗 ({device_str.upper()})",
-            )
-        ]
+        descriptors = []
+        # descriptors = [
+        #     AlgorithmDescriptor(
+        #         key="ppo",
+        #         name="PPO",
+        #         trainer_factory=lambda: PPOTrainer(**ppo_kwargs),
+        #         use_vector_envs=True,
+        #         vector_envs=config.get_recommended_n_envs(),
+        #         hotkey=pygame.K_1,
+        #         action_label="1",
+        #         color=(120, 200, 255),
+        #         window_title=f"PPO 訓練視窗 ({device_str.upper()})",
+        #     )
+        # ]
 
         for desc in descriptors:
             self.ai_manager.register(desc)
@@ -437,114 +440,7 @@ class GameUI:
     def _prepare_ppo_resume(
         self, slot: AlgorithmState, *, force_reset: bool = False
     ) -> None:
-        trainer = slot.trainer
-        agent = slot.agent
-        if trainer is None or agent is None:
-            return
-        if not isinstance(trainer, PPOTrainer):
-            return
-
-        try:
-            import torch
-        except Exception:
-            print("⚠️ 找不到 PyTorch，無法載入 PPO 模型。")
-            return
-
-        def _load_model(path: str) -> bool:
-            try:
-                print(f"🔄 正在載入檢查點: {path}")
-                state = torch.load(path, map_location=trainer.device)
-                if isinstance(state, dict):
-                    model_state = state.get("model_state", state)
-
-                    # 記錄載入前的權重（用於驗證）
-                    first_param_before = next(
-                        iter(trainer.net.parameters())
-                    ).data.clone()
-
-                    trainer.net.load_state_dict(model_state)
-
-                    # 檢查載入後的權重是否改變
-                    first_param_after = next(iter(trainer.net.parameters())).data
-                    diff = (
-                        torch.abs(first_param_after - first_param_before).sum().item()
-                    )
-
-                    if diff > 1e-6:
-                        print(f"   ✅ 模型權重已成功載入 (權重差異: {diff:.2f})")
-                    else:
-                        print(f"   ⚠️  警告: 權重似乎未改變 (差異: {diff:.6f})")
-
-                    opt_state = state.get("optimizer_state")
-                    if opt_state is not None:
-                        try:
-                            trainer.opt.load_state_dict(opt_state)
-                            print("   ✅ 優化器狀態已載入")
-                        except Exception:
-                            print("   ⚠️ 無法載入 optimizer_state，將重新初始化優化器")
-                    return True
-                else:
-                    print("   ❌ 檢查點格式錯誤（不是字典）")
-            except Exception as load_err:
-                print(f"   ❌ 載入模型失敗: {load_err}")
-            return False
-
-        checkpoint_path = None
-        if not force_reset and self.training_iterations > 0:
-            candidate = os.path.join(
-                "checkpoints", f"checkpoint_{self.training_iterations}.pt"
-            )
-            if os.path.exists(candidate):
-                checkpoint_path = candidate
-
-        if checkpoint_path is None and not force_reset:
-            latest_path, latest_iter = self._latest_checkpoint()
-            if latest_path is not None:
-                checkpoint_path = latest_path
-                if (
-                    isinstance(latest_iter, int)
-                    and latest_iter > self.training_iterations
-                ):
-                    self.training_iterations = latest_iter
-                    self.n = latest_iter
-
-        loaded = False
-        if checkpoint_path is not None and not force_reset:
-            self.ai_status = "loading"
-            print(f"\n{'='*60}")
-            print("📥 開始載入檢查點")
-            print(f"{'='*60}")
-            loaded = _load_model(checkpoint_path)
-            if loaded:
-                print("✅ 檢查點載入成功！")
-            else:
-                print("❌ 檢查點載入失敗")
-            print(f"{'='*60}\n")
-
-        # 嘗試載入最佳檢查點（如果存在且未載入其他檢查點）
-        if not loaded and not force_reset:
-            best_checkpoint = os.path.join("checkpoints", "checkpoint_best.pt")
-            if os.path.exists(best_checkpoint):
-                self.ai_status = "loading"
-                print(f"\n💎 嘗試載入最佳檢查點: {best_checkpoint}")
-                loaded = _load_model(best_checkpoint)
-                if loaded:
-                    print("✅ 最佳檢查點載入成功！")
-
-        if not loaded and not force_reset:
-            model_path = os.path.join("checkpoints", "ppo_best.pth")
-            if os.path.exists(model_path):
-                self.ai_status = "loading"
-                print(f"\n🔄 嘗試載入備用檢查點: {model_path}")
-                loaded = _load_model(model_path)
-
-        if not loaded and force_reset:
-            self.training_iterations = 0
-            self.n = 0
-            slot.ai_round = 0
-
-        slot.agent = agent
-        slot.trainer = trainer
+        pass
 
     def _update_layout(self, width: int, height: int) -> None:
         width = int(max(self.min_width, width))
@@ -1547,8 +1443,9 @@ class GameUI:
             return self.env.reset()
         if not self.running and self.btn_ai.collidepoint(pos):
             # 顯示訓練配置對話框
-            self.training_dialog = TrainingDialog(self.width, self.height)
-            self.show_training_dialog = True
+            # self.training_dialog = TrainingDialog(self.width, self.height)
+            # self.show_training_dialog = True
+            print("Training UI is disabled. Please use rl/train_sb3.py for training.")
             return None
         if not self.running and self.btn_replay.collidepoint(pos):
             return self._start_replay_mode()
