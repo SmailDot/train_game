@@ -80,7 +80,7 @@ graph TD
         direction TB
         Envs["🖥️ 開 32 個遊戲視窗 (Parallel Envs)"]
         Envs --> Wrap1["未來視：了解4張圖的路徑<br>(FrameSkip)"]
-        Wrap1 --> Wrap2["濾鏡：把數據整理成 AI 好懂的樣子<br>(VecNormalize)"]
+        Wrap1 --> Wrap2["濾鏡：統一度量衡<br>(VecNormalize)"]
     end
 
     Wrap2 --> Rollout
