@@ -11,7 +11,7 @@ import sys
 from argparse import BooleanOptionalAction
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -23,6 +23,12 @@ from stable_baselines3.common.callbacks import (
     EvalCallback,
 )
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.logger import (
+    CSVOutputFormat,
+    KVWriter,
+    Logger,
+    TensorBoardOutputFormat,
+)
 from stable_baselines3.common.vec_env import VecMonitor, VecNormalize
 
 # 添加項目根目錄到路徑
@@ -38,6 +44,134 @@ def _import_env():
 
 
 Game2048Env = _import_env()
+
+
+# --- Custom Logger for Chinese Support and Alignment ---
+
+KEY_TRANSLATIONS = {
+    # Environment
+    "env/alignment_score": "env/alignment_score(對齊分數)",
+    "env/passed_count": "env/passed_count(通過障礙物數量)",
+    "env/scroll_speed": "env/scroll_speed(目前捲動速度)",
+    "env/win_rate": "env/win_rate(通關次數)",
+    # Rollout
+    "rollout/ep_len_mean": "rollout/ep_len_mean(平均回合長度)",
+    "rollout/ep_rew_mean": "rollout/ep_rew_mean(平均回合獎勵)",
+    # Time
+    "time/fps": "time/fps(幀率)",
+    "time/iterations": "time/iterations(迭代次數)",
+    "time/time_elapsed": "time/time_elapsed(經過時間)",
+    "time/total_timesteps": "time/total_timesteps(總步數)",
+    # Train
+    "train/approx_kl": "train/approx_kl(近似KL散度)",
+    "train/clip_fraction": "train/clip_fraction(更新幅度過大比例)",
+    "train/clip_range": "train/clip_range(更新幅度限制)",
+    "train/entropy_coef": "train/entropy_coef(熵係數)",
+    "train/entropy_loss": "train/entropy_loss(熵損失)",
+    "train/explained_variance": "train/explained_variance(價值預測準確度)",
+    "train/learning_rate": "train/learning_rate(學習率)",
+    "train/loss": "train/loss(總損失)",
+    "train/n_updates": "train/n_updates(更新次數)",
+    "train/policy_gradient_loss": "train/policy_gradient_loss(策略梯度損失)",
+    "train/value_loss": "train/value_loss(價值損失)",
+}
+
+
+def get_visual_width(s: str) -> int:
+    """Calculate visual width of a string (Chinese chars = 2)."""
+    width = 0
+    for char in s:
+        if "\u4e00" <= char <= "\u9fff" or "\uff00" <= char <= "\uffef":
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+class ChineseHumanOutputFormat(KVWriter):
+    """Custom output format that handles Chinese character alignment correctly."""
+
+    def __init__(self, file):
+        self.file = file
+
+    def write(
+        self,
+        key_values: Dict[str, Any],
+        key_excluded: Dict[str, Union[str, Tuple[str, ...]]],
+        step: int = 0,
+    ) -> None:
+        # Create strings for printing
+        kv_list = []
+        for k, v in sorted(key_values.items()):
+            # Ignore exclusion to ensure we print everything we have
+            # if k in key_excluded: continue
+
+            # Format value
+            if isinstance(v, float):
+                val_str = f"{v:.3g}"
+            else:
+                val_str = str(v)
+
+            # Split key into English and Chinese parts
+            # Assuming format: "english_key(chinese_translation)"
+            if "(" in k and k.endswith(")"):
+                parts = k.split("(")
+                eng_part = parts[0]
+                chn_part = "(" + parts[1]
+            else:
+                eng_part = k
+                chn_part = ""
+
+            kv_list.append((eng_part, chn_part, val_str))
+
+        if not kv_list:
+            return
+
+        # Calculate max width for key column
+        # We want: English Left <spaces> Chinese Right
+        # So max_key_width = max(visual_width(eng) + visual_width(chn)) + padding
+        max_key_width = 0
+        for eng, chn, _ in kv_list:
+            width = get_visual_width(eng) + get_visual_width(chn)
+            if width > max_key_width:
+                max_key_width = width
+
+        # Add some minimum padding between English and Chinese
+        max_key_width += 2
+
+        max_val_len = max(get_visual_width(v) for _, _, v in kv_list)
+
+        # Print separator
+        # Format: | key_column | val |
+        # Width: 2 + max_key_width + 3 + max_val_len + 2
+        dash_len = max_key_width + max_val_len + 7
+        self.file.write("-" * dash_len + "\n")
+
+        for eng, chn, v in kv_list:
+            # Key formatting: English + spaces + Chinese
+            current_key_width = get_visual_width(eng) + get_visual_width(chn)
+            padding_len = max_key_width - current_key_width
+            key_str = f"{eng}{' ' * padding_len}{chn}"
+
+            val_padding = " " * (max_val_len - get_visual_width(v))
+            self.file.write(f"| {key_str} | {v}{val_padding} |\n")
+
+        self.file.write("-" * dash_len + "\n")
+        self.file.flush()
+
+
+class ChineseLogger(Logger):
+    """Logger that translates keys to Chinese before recording."""
+
+    def record(
+        self,
+        key: str,
+        value: Any,
+        exclude: Optional[Union[str, Tuple[str, ...]]] = None,
+    ) -> None:
+        # Translate key if possible
+        translated_key = KEY_TRANSLATIONS.get(key, key)
+        super().record(translated_key, value, exclude)
 
 
 def make_linear_schedule(start: float, end: float):
@@ -663,6 +797,16 @@ def main():
     else:
         model = create_model(env, config)
 
+    # 配置自定義 Logger (支援中文與對齊)
+    log_dir = "./logs/tensorboard/"
+    output_formats = [
+        ChineseHumanOutputFormat(sys.stdout),
+        TensorBoardOutputFormat(log_dir),
+        CSVOutputFormat(os.path.join(log_dir, "progress.csv")),
+    ]
+    custom_logger = ChineseLogger(folder=log_dir, output_formats=output_formats)
+    model.set_logger(custom_logger)
+
     apply_finetune_overrides(model, args.finetune_lr, args.finetune_ent)
 
     # 創建回調
@@ -690,7 +834,7 @@ def main():
         model.learn(
             total_timesteps=args.total_timesteps,
             callback=callbacks,
-            progress_bar=True,
+            progress_bar=False,
             reset_num_timesteps=reset_timesteps,
         )
 
