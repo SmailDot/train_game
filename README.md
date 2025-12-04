@@ -54,7 +54,7 @@
 
 ### AOV 結構圖 (System Architecture)
 
-這展示了數據在系統中的流動與處理順序：
+數據在系統中的流動與處理順序：
 
 ```mermaid
 graph TD
@@ -75,6 +75,83 @@ graph TD
     I -- "定期評估" --> J["評估環境 (4 Envs)"]
     J -- "保存最佳模型" --> K["Best Model Checkpoint"]
     I -- "更新策略" --> E
+```
+
+### BREAK DOWN (系統分析圖)
+
+```mermaid
+graph TD
+    %% === L1 Core ===
+    Core("🎮 深度強化學習訓練平台<br>(Train Game AI - v5)")
+
+    %% === L2 Main Branches ===
+    Core --> EnvBlock
+    Core --> AgentBlock
+    Core --> SysBlock
+
+    %% === Branch 1: Environment ===
+    subgraph EnvBlock ["📍 遊戲環境 (Game Environment)"]
+        direction TB
+        Env("環境核心") --> Obs("觀察空間<br>(Observation)")
+        Env --> Rew("獎勵重塑<br>(Reward Shaping)")
+        Env --> Act("動作空間<br>(Action)")
+        
+        %% Obs Details
+      Obs --> ObsList["7維輸入向量:<br>1. y (玩家目前高度)<br>2. vy (垂直速度)<br>3. x_obs (距下一個障礙物的水平距離)<br>4. gap_top (縫隙上緣的 Y 座標)<br>5. gap_bottom (縫隙下緣的 Y 座標)<br>6. rel_top (距縫隙上緣的相對距離)<br>7. rel_bottom (距縫隙下緣的相對距離)"]
+        Obs --> Norm[" VecNormalize<br>(數值標準化)"]
+
+        %% Reward Details (Updated for v5)
+        Rew --> RA("成就 (Achievement)")
+        RA --> RA1["通關 (+1000)"]
+        RA --> RA2["保持存活(+0.01)"]
+        RA --> RA3["通過障礙 (+5)"]
+
+        Rew --> RG("引導 (Guidance)")
+        RG --> RG1["Survival (存活獎勵)<br>(核心驅動力)"]
+        RG --> RG2["Alignment (中心對齊)<br>(低權重輔助)"]
+
+        Rew --> RP("懲罰 (Penalty)")
+        RP --> RP1["Death (-5)<br>(撞牆/出界)"]
+        %% 移除了 Time Cost，因為 v5 不再使用
+
+        %% Action Details
+        Act --> ActList["Discrete(2):<br>0: 不跳 / 1: 跳躍"]
+    end
+
+    %% === Branch 2: Agent ===
+    subgraph AgentBlock ["🧠 PPO 決策模型 (Agent)"]
+        direction TB
+        Agent("PPO 模型") --> Net("神經網路 (v5)")
+        Agent --> Opt("優化機制")
+
+        %% Network Details (Updated to 256)
+        Net --> N1["Input Layer (7 Nodes)"]
+        Net --> N2["Hidden 1 (256, ReLU)"]
+        Net --> N3["Hidden 2 (256, ReLU)"]
+        Net --> N4["Output Layer (2 Nodes)"]
+
+        %% Optimization Details
+        Opt --> O1["Clip Loss<br>(限制更新幅度)"]
+        Opt --> O2["Value Loss<br>(局勢判斷)"]
+        Opt --> O3["Entropy Loss<br>(探索好奇心)"]
+    end
+
+    %% === Branch 3: System ===
+    subgraph SysBlock ["⚙️ 訓練系統 (System)"]
+        direction TB
+        Sys("系統架構") --> Comp("運算配置")
+        Sys --> Tools("輔助工具")
+
+        %% Computation
+        Comp --> C1["32 Parallel Envs"]
+        Comp --> C2["FrameSkip: 4<br>(決策跳幀)"]
+        Comp --> C3["Total Timesteps<br>(5M+)"]
+
+        %% Tools
+        Tools --> T1["Auto-Resume<br>(自動續訓)"]
+        Tools --> T2["TensorBoard<br>(數據監控)"]
+        Tools --> T3["Replay Render<br>(回放)"]
+    end
 ```
 
 ---
