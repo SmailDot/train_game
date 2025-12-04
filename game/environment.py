@@ -476,12 +476,27 @@ class GameEnv:
                 return
 
         # Minimal text render (for smoke testing)
-        obs_count = len(self.obstacles)
-        nearest_x = min((obs[0] for obs in self.obstacles), default=999.9)
-        print(
-            f"t={self.t} y={self.y:.1f} vy={self.vy:.1f} obstacles={obs_count} "
-            f"nearest_x={nearest_x:.1f}"
-        )
+        # obs_count = len(self.obstacles)
+
+    def close(self):
+        """Clean up resources."""
+        if hasattr(self, "window"):
+            try:
+                import pygame
+
+                pygame.display.quit()
+                pygame.quit()
+            except ImportError:
+                pass
+            del self.window
+
+        # Minimal text render (for smoke testing)
+        # obs_count = len(self.obstacles)
+        # nearest_x = min((obs[0] for obs in self.obstacles), default=999.9)
+        # print(
+        #     f"t={self.t} y={self.y:.1f} vy={self.vy:.1f} obstacles={obs_count} "
+        #     f"nearest_x={nearest_x:.1f}"
+        # )
 
     def get_all_obstacles(self):
         """Return obstacles as (x, gap_top, gap_bottom) tuples for rendering."""

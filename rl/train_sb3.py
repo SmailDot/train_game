@@ -29,7 +29,7 @@ from stable_baselines3.common.logger import (
     Logger,
     TensorBoardOutputFormat,
 )
-from stable_baselines3.common.vec_env import VecMonitor, VecNormalize
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
 
 # 添加項目根目錄到路徑
 project_root = Path(__file__).parent.parent
@@ -441,7 +441,16 @@ def create_envs(
     if render_mode:
         env_kwargs["render_mode"] = render_mode
 
-    vec_env = make_vec_env(Game2048Env, n_envs=n_envs, env_kwargs=env_kwargs, seed=seed)
+    # 如果啟用渲染，強制使用 SubprocVecEnv 以避免視窗衝突
+    vec_env_cls = SubprocVecEnv if render_mode == "human" and n_envs > 1 else None
+
+    vec_env = make_vec_env(
+        Game2048Env,
+        n_envs=n_envs,
+        env_kwargs=env_kwargs,
+        seed=seed,
+        vec_env_cls=vec_env_cls,
+    )
 
     # 添加監控
     log_dir = "./logs/"
