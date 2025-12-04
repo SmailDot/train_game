@@ -32,10 +32,10 @@ class GameEnv:
     WinningScore = 6666
 
     # Reward shaping & curriculum knobs
-    AlignmentRewardScale = 0.08
+    AlignmentRewardScale = 0.2
     VelocityPenaltyScale = 0.02
-    StepPenalty = -0.05
-    GapShrinkPerPass = 0.8
+    StepPenalty = 0.0
+    GapShrinkPerPass = 0.6  # Relaxed from 0.8 to make late game slightly more fair
     MaxGapHalf = 120.0
     MinGapHalf = 70.0
 
@@ -107,6 +107,23 @@ class GameEnv:
                 nearest_obs = obs
         return nearest_obs
 
+    def _find_next_obstacle(self, current_obs):
+        """Return the obstacle immediately following the current one."""
+        if current_obs is None:
+            return None
+
+        next_obs = None
+        min_dist = float("inf")
+        current_x = current_obs[0]
+
+        for obs in self.obstacles:
+            # Find obstacle that is strictly to the right of the current one
+            # We use a small epsilon to handle float comparisons if needed
+            if obs[0] > current_x + 1.0 and obs[0] < min_dist:
+                min_dist = obs[0]
+                next_obs = obs
+        return next_obs
+
     def _get_state(self):
         # Find the nearest obstacle ahead of the player (at x ~= 0)
         nearest_obs = self._find_nearest_obstacle()
@@ -114,8 +131,23 @@ class GameEnv:
         # If no obstacle found, use a dummy far away obstacle
         if nearest_obs is None:
             ob_x, gap_top, gap_bottom = self.MaxDist, 250.0, 350.0
+            # Next obstacle is also dummy
+            next_x, next_gap_top, next_gap_bottom = self.MaxDist * 2, 250.0, 350.0
         else:
             ob_x, gap_top, gap_bottom = nearest_obs[0], nearest_obs[1], nearest_obs[2]
+
+            # Find next obstacle
+            next_obs = self._find_next_obstacle(nearest_obs)
+            if next_obs is None:
+                # If no next obstacle, assume similar to current or default
+                next_x = ob_x + self.ObstacleSpacing
+                next_gap_top, next_gap_bottom = 250.0, 350.0
+            else:
+                next_x, next_gap_top, next_gap_bottom = (
+                    next_obs[0],
+                    next_obs[1],
+                    next_obs[2],
+                )
 
         s = np.array(
             [
@@ -126,6 +158,13 @@ class GameEnv:
                 gap_bottom / self.ScreenHeight,
                 (gap_top - self.y) / self.ScreenHeight,  # Relative dist to top
                 (gap_bottom - self.y) / self.ScreenHeight,  # Relative dist to bottom
+                # --- New Features: Next Obstacle ---
+                min(next_x, self.MaxDist * 2)
+                / (self.MaxDist * 2),  # Normalize with larger range
+                next_gap_top / self.ScreenHeight,
+                next_gap_bottom / self.ScreenHeight,
+                (next_gap_top - self.y) / self.ScreenHeight,
+                (next_gap_bottom - self.y) / self.ScreenHeight,
             ],
             dtype=np.float32,
         )
@@ -215,25 +254,26 @@ class GameEnv:
             normalized_distance = min(
                 1.0, distance_from_center / (gap_half + ball_radius)
             )
-            alignment_score = 1.0 - normalized_distance
+            # Sharpened alignment reward: Quadratic falloff
+            # Encourages being perfectly in the center much more than being "just okay"
+            alignment_score = (1.0 - normalized_distance) ** 2
             reward += self.AlignmentRewardScale * alignment_score
 
             # Distance Reward: Encourage moving towards the goal (passing obstacles)
             # Give a small reward for being close to the gap center vertically
             # And implicitly, passing obstacles gives a large reward.
-            # Here we add a small reward based on horizontal progress relative to the nearest obstacle
+            # Here we add a small reward based on horizontal progress
             # If the obstacle is approaching (x decreasing), it means we are surviving.
-            # But to encourage "winning" (reaching score), we need to incentivize speed or progress.
-            # Since speed is constant/controlled by scroll, we incentivize "not dying" + "passing".
+            # But to encourage "winning", we need to incentivize speed or progress.
+            # Since speed is constant, we incentivize "not dying" + "passing".
 
-            # Time Penalty: Encourage finishing quickly (or rather, not loitering if that were possible,
-            # but here scroll is fixed. However, user requested it to prevent "farming" behavior if any).
-            # In a fixed-scroll game, time penalty might just lower total score, but let's add it as requested.
-            reward -= 0.01
+            # Time Penalty: Encourage finishing quickly
+            # In a fixed-scroll game, time penalty might just lower total score.
+            # reward -= 0.01  # Removed as requested by user to reduce frustration
 
         reward -= self.VelocityPenaltyScale * (abs(self.vy) / self.MaxAbsVel)
 
-        # Survival reward: encourage staying alive (User wants to replace this with winning focus)
+        # Survival reward: encourage staying alive
         # reward += 0.01 # Removed to focus on winning/passing
 
         # Check collisions and pass-through events for all obstacles
@@ -255,8 +295,18 @@ class GameEnv:
                 ball_bottom = self.y + ball_radius
                 # 球體沒有與障礙物碰撞（即在間隙內通過）
                 if ball_top >= gap_top and ball_bottom <= gap_bottom:
-                    reward += 5.0
+                    reward += 25.0  # Increased from 10.0 to prioritize survival/passing
                     self.passed_count += 1
+
+                    # Milestone reward: Encourage long survival
+                    if self.passed_count % 50 == 0:
+                        reward += 100.0
+
+                    # High Speed Bonus: Extra reward for surviving in high speed zones
+                    if current_scroll > 3.0:
+                        reward += 5.0  # Bonus for handling high speed
+                    if current_scroll > 3.8:
+                        reward += 10.0  # Super bonus for max speed survival
 
                     # Check for winning condition
                     if self.episode_score + reward >= self.WinningScore:
@@ -399,6 +449,31 @@ class GameEnv:
         mode = mode or "human"
         if mode == "rgb_array":
             return self.render_frame()
+
+        if mode == "human":
+            try:
+                import pygame
+            except ImportError:
+                pass
+            else:
+                if not hasattr(self, "window"):
+                    pygame.init()
+                    self.window = pygame.display.set_mode((640, 480))
+                    pygame.display.set_caption(f"Training Env {id(self)}")
+                    self.clock = pygame.time.Clock()
+
+                frame = self.render_frame(width=640, height=480)
+                # Frame is (H, W, 3) RGB. Pygame expects (W, H, 3) for make_surface
+                surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
+
+                self.window.blit(surface, (0, 0))
+                pygame.display.flip()
+
+                # Handle events to prevent "Not Responding"
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.close()
+                return
 
         # Minimal text render (for smoke testing)
         obs_count = len(self.obstacles)

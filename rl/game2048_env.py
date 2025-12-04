@@ -46,10 +46,12 @@ class Game2048Env(gym.Env):
         # 定義動作空間：離散動作 (0: 不跳, 1: 跳)
         self.action_space = spaces.Discrete(2)
 
-        # 定義觀察空間：7 維連續狀態 (y, vy, x_obs, gap_top, gap_bottom, rel_top, rel_bottom)
+        # 定義觀察空間：12 維連續狀態
+        # (y, vy, x_obs, gap_top, gap_bottom, rel_top, rel_bottom)
+        # + (next_x, next_gap_top, next_gap_bottom, next_rel_top, next_rel_bottom)
         # 值域約為 [-1, 1]
         self.observation_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(7,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(12,), dtype=np.float32
         )
 
         # 追蹤資訊
@@ -103,6 +105,9 @@ class Game2048Env(gym.Env):
 
         # 執行動作
         obs, reward, terminated, info = self.game.step(action)
+
+        if self.render_mode == "human":
+            self.game.render("human")
 
         # 更新追蹤資訊
         self.current_score += float(reward)

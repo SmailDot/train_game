@@ -729,6 +729,11 @@ def main():
         action="store_true",
         help="自動嘗試載入最佳或最新的模型繼續訓練",
     )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="啟用渲染模式 (注意：這會開啟大量視窗，僅用於調試)",
+    )
 
     args = parser.parse_args()
 
@@ -783,6 +788,7 @@ def main():
         training=True,
         norm_path=args.norm_path,
         seed=args.seed,
+        render_mode="human" if args.render else None,
     )
 
     # 獲取配置
