@@ -78,9 +78,9 @@ graph TD
     %% === Environment Setup ===
     subgraph EnvSetup ["⚙️ 環境準備 (Environment Setup)"]
         direction TB
-        Envs["🖥️ 開 32 個遊戲視窗 (Parallel Envs)"]
-        Envs --> Wrap1["未來視：了解4張圖的路徑<br>(FrameSkip)"]
-        Wrap1 --> Wrap2["濾鏡：統一度量衡<br>(VecNormalize)"]
+        Envs["🖥️ 開 32 個遊戲視窗<br> (Parallel Envs)"]
+        Envs --> Wrap2["未來視：了解4張圖的路徑<br>(FrameSkip)"]
+        
     end
 
     Wrap2 --> Rollout
@@ -90,9 +90,9 @@ graph TD
         direction TB
         
         %% Step 1: Interaction
-        Rollout["🎮 讓 AI 實際上場玩 (Rollout)"]
+        Rollout["🎮 讓 AI 實際上場玩<br> (Rollout)"]
         Rollout -- "看到 7 種數據資訊" --> Agent["AI 決定怎麼走 (Actor)"]
-        Agent -- "按下按鍵" --> Step["遊戲畫面動一下 (Physics Step)"]
+        Agent -- "按下按鍵" --> Step["遊戲畫面動一下<br> (Physics Step)"]
         
         %% Step 2: Feedback
         Step -- "回傳結果 " --> Buffer["📝 寫進「紀錄日誌」<br>(RolloutBuffer)"]
@@ -110,7 +110,7 @@ graph TD
     EvalCheck -- "還沒" --> Rollout
 
     %% === Evaluation & Save ===
-    subgraph EvalLoop ["📊 考試與存檔 (Evaluation)"]
+    subgraph EvalLoop ["📊 考試與存檔<br> (Evaluation)"]
         direction TB
         EvalCheck -- "該考了" --> Test["🧪 隨堂測驗 (4 個考場)"]
         Test --> Metrics["📈 結算成績單"]
