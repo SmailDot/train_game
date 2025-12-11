@@ -299,6 +299,20 @@ $$
 
 ---
 
+### 最終模型的Loss Function圖
+
+[查看Loss Function](2d_loss_plot_PPO_6666_Profile_200k.html)
+
+**Mean Episode Reward** (平均回合獎勵)：最重要。直接告訴你模型強不強。如果這個不升反降，其他參數再漂亮都沒用。
+
+**Value Loss** (價值損失)：大腦的準度。模型對局勢判斷準不準。如果這個一直很高或震盪，代表模型「看不懂」現在的盤面。
+
+**Policy Gradient Loss** (策略梯度損失)：學習的幅度。代表模型修正自己行為的力度。如果這個值長期為 0，代表模型停止學習了；如果震盪太大，代表學習太激進（可能學壞）。
+
+**Entropy Loss** (熵損失)：心態。代表模型是「勇於嘗試」（高 Entropy）還是「保守行事」（低 Entropy）。這用來判斷模型是否過早收斂（太早放棄嘗試新招）或一直學不會（一直亂試）。
+
+---
+
 ## 🧠 PPO 介紹
 
 **Proximal Policy Optimization (近端策略優化)**
