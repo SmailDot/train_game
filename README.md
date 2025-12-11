@@ -211,7 +211,7 @@ graph LR
     %% === Agent 的視角 ===
     subgraph Agent_Block ["🧠 AI Agent API"]
         direction TB
-        A_In("Input: State<br>5個環境數值")
+        A_In("Input: State<br>7個環境數值")
         A_Proc("agent.act()")
         A_Out("Output: Action<br>0 或 1")
         
