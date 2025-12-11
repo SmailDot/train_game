@@ -98,15 +98,15 @@ graph TD
         Step -- "回傳結果 " --> Buffer["📝 寫進「紀錄日誌」<br>(RolloutBuffer)"]
         
         %% Step 3: Optimization
-        Buffer -- "日誌寫滿了嗎？" --> Update{"開始特訓？"}
+        Buffer -- "日誌寫滿了嗎？(32*2048)" --> Update{"開始特訓？"}
         Update -- "還沒" --> Rollout
         Update -- "滿了" --> Algo["🧠 PPO 核心大腦"]
         
-        Algo -- "算算剛才那樣走好不好，是否還有需要優化的參數" --> Loss["📉 計算跟標準答案差多少<br>(Loss Calculation)"]
+        Algo -- "算算剛才那樣走好不好<br>是否還有需要優化的參數" --> Loss["📉 計算跟標準答案差多少<br>(Loss Calculation)"]
         Loss -- "自適應調整 (Backprop)" --> Opt["⚖️ 調整大腦參數<br>(Update Weights)"]
     end
 
-    Opt --> EvalCheck{"⏱️ 該隨堂考了嗎？<br>(Periodic Eval)"}
+    Opt --> EvalCheck{"⏱️ 該隨堂考了嗎？<br>(達到160萬步)"}
     EvalCheck -- "還沒" --> Rollout
 
     %% === Evaluation & Save ===
