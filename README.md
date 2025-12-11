@@ -468,23 +468,55 @@ PPO 就是要讓這位學生「德智體群美」全面發展。
 
 **Entropy Loss** (熵損失)：心態。代表模型是「勇於嘗試」（高 Entropy）還是「保守行事」（低 Entropy）。這用來判斷模型是否過早收斂（太早放棄嘗試新招）或一直學不會（一直亂試）。
 
----
+-----
 
-## 🧠 PPO 介紹
+### 多環境並行訓練與評估機制 (Parallel Training & Evaluation Implementation)
 
-**Proximal Policy Optimization (近端策略優化)**
+透過程式碼實作證明，我們這個專案*預設*採用 **32 個並行環境**進行高效率訓練，並配置 **4 個獨立環境**進行模型評估。
 
-PPO 是目前最流行的深度強化學習演算法之一，由 OpenAI 提出。
+#### 1\. 訓練階段：32 個並行環境 (32 Parallel Training Envs)
 
-### 核心概念
-1.  **On-Policy (在線策略)**：AI 一邊玩，一邊學習。它只能使用「自己當前策略」產生的經驗來學習，不能使用別人的或過去的經驗。
-2.  **Trust Region (信任區域)**：PPO 的核心思想是「不要改太多」。它限制了每次策略更新的幅度，確保新的策略不會偏離舊策略太遠。
-3.  **Clipping (裁剪)**：這是 PPO 實現信任區域的方法。它直接把概率比率 $r_t(\theta)$ 限制在 $[1-\epsilon, 1+\epsilon]$ 之間，簡單粗暴但非常有效。
+為了加速經驗收集 (Experience Collection)，我們在 `train_sb3.py` 的主程式入口處定義了並行數量。
 
-### 為什麼選擇 PPO？
-- **穩定性高**：不容易因為參數設錯而導致訓練崩潰。
-- **調參簡單**：相比於 DQN 或 DDPG，PPO 對超參數不那麼敏感。
-- **適用性廣**：既能玩離散動作遊戲 (如 Super Mario)，也能玩連續動作遊戲 (如 機器人控制)。
+  * **實作位置**：`train_sb3.py` (main function)
+  * **程式碼證據**：
+    我們使用了 `argparse` 來設定預設參數。除非手動更改，否則系統預設啟動 **32** 個環境。
+    ```python
+    # train_sb3.py - 設定命令行參數
+    parser.add_argument(
+        "--n-envs", 
+        type=int, 
+        default=32,  # <--- 預設開啟 32 個視窗
+        help="Number of parallel environments"
+    )
+    ```
+  * **執行驗證**：
+    程式啟動時，會即時印出 log 確認當前的並行數量：
+    ```python
+    print(f"🚀 並行環境: {args.n_envs}")
+    ```
+
+#### 2\. 評估階段：4 個監考環境 (4 Evaluation Envs)
+
+為了確保評估的準確性與效率，我們在建立回調函數 (Callbacks) 時，獨立建立了一組**不參與訓練、專門用來考試的環境。**
+
+  * **實作位置**：`train_sb3.py` 中的 `create_callbacks` 函數
+  * **程式碼證據**：
+    在配置 `EvalCallback` 之前，我們明確指派了 **4** 個環境給 `eval_env`。
+    ```python
+    # train_sb3.py - create_callbacks 函數
+    eval_env = create_envs(
+        n_envs=4,           # <--- 指定 4 個監考
+        normalize=normalize,
+        training=False,     # 設定為非訓練模式 (考試模式)
+        # ... 其他參數
+    )
+    ```
+  * **設計目的**：
+    這 4 個環境專門提供給 `EvalCallback` 使用，確保模型在訓練過程中，能定期在標準化且公平的環境下測試勝率，而不會受到訓練雜訊的干擾。
+
+> 1.  **訓練端**：透過 `Argument Parser` 設定 **`default=32`**，利用 CPU 多核優勢並行收集 32 倍的數據，大幅縮短收斂時間。
+> 2.  **評估端**：在 `create_callbacks` 中硬體編碼 (Hard-coded) 了 **`n_envs=4`**，建立獨立的驗證集環境。這保證了我們的『考試』是在 4 個平行世界中取平均值，比單次測試更具統計意義且客觀。」
 
 ---
 
