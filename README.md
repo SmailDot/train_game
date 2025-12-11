@@ -205,7 +205,45 @@ graph TD
         Tools --> T3["Replay Render<br>(回放)"]
     end
 ```
+# Project API Documentation
+```mermaid
+graph LR
+    %% === Agent 的視角 ===
+    subgraph Agent_Block ["🧠 AI Agent API"]
+        direction TB
+        A_In("Input: State<br>5個環境數值")
+        A_Proc("agent.act()")
+        A_Out("Output: Action<br>0 或 1")
+        
+        A_In --> A_Proc --> A_Out
+    end
 
+    %% === 連接線 ===
+    A_Out == "動作傳給遊戲" ==> E_In
+
+    %% === Environment 的視角 ===
+    subgraph Env_Block ["🌍 Environment API"]
+        direction TB
+        E_In("Input: Action<br>0 或 1")
+        E_Proc("env.step()")
+        E_Out("Output: State, Reward...<br>新的畫面數值")
+
+        E_In --> E_Proc --> E_Out
+    end
+
+    %% === 回圈 ===
+    E_Out == "新狀態傳給AI" ==> A_In
+
+    %% === 樣式定義 (移到最後面最安全) ===
+    classDef inputCls fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef processCls fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef outputCls fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+
+    %% === 套用樣式 ===
+    class A_In,E_In inputCls;
+    class A_Proc,E_Proc processCls;
+    class A_Out,E_Out outputCls;
+```
 ---
 
 ## 🎨 專案特徵設計
