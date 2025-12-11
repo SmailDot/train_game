@@ -301,7 +301,7 @@ $$
 
 ### 最終模型的Loss Function圖
 
-[查看Loss Function](2d_loss_plot_PPO_6666_Profile_200k.html)
+[查看Loss Function](https://smaildot.github.io/train_game/2d_loss_plot_PPO_6666_Profile_200k.html)
 
 **Mean Episode Reward** (平均回合獎勵)：最重要。直接告訴你模型強不強。如果這個不升反降，其他參數再漂亮都沒用。
 
