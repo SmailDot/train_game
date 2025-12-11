@@ -1,10 +1,72 @@
 # Project API Documentation
+```mermaid
+graph TD
+    %% === 1. 核心環境區塊 ===
+    subgraph Environment ["1. 遊戲環境 (game.environment)"]
+        direction TB
+        GameEnv[("🏗️ GameEnv<br>(核心類別)")]
+        
+        %% 初始化參數
+        subgraph Init ["⚙️ 初始化 (Init Settings)"]
+            Params("seed (種子)<br>max_steps (最大步數)<br>frame_skip (跳幀數)")
+        end
+        
+        %% 狀態與動作
+        subgraph DataIO ["📊 數據輸入/輸出"]
+            Obs["👁️ 狀態空間 (Observation)<br>[y, vy, x_obs, gap_top, gap_bottom]"]
+            Act["🎮 動作空間 (Action)<br>0: 自由落體<br>1: 跳躍"]
+        end
+        
+        %% 方法
+        subgraph EnvMethods ["🛠️ 功能方法"]
+            Reset["reset() -> state"]
+            Step["step(action) -> (state, reward, done, info)"]
+            Diff["apply_difficulty_profile(config)"]
+        end
 
-這份文件詳細說明了專案的核心 API，包括遊戲環境 (`GameEnv`)、代理人 (`Agents`) 以及 AI 管理器 (`AlgorithmManager`)。
+        GameEnv --> Init
+        GameEnv --> DataIO
+        GameEnv --> EnvMethods
+    end
 
+    %% === 2. 代理人區塊 ===
+    subgraph Agents ["2. 代理人 (Agents)"]
+        direction TB
+        AgentInterface{{"🧠 Agent 共同介面<br>act(state, explore)"}}
+        
+        PPO["PPOAgent<br>(自製 PPO 訓練用)"]
+        SB3["SB3ReplayAgent<br>(讀取模型重播用)"]
+        
+        PPO -.-> AgentInterface
+        SB3 -.-> AgentInterface
+    end
+
+    %% === 3. 管理器區塊 ===
+    subgraph Manager ["3. AI 管理器 (game.ai_manager)"]
+        AlgoMgr["💼 AlgorithmManager"]
+        MgrFuncs["register() 註冊<br>set_active() 切換<br>active_state() 獲取狀態"]
+        
+        AlgoMgr --> MgrFuncs
+    end
+
+    %% === 4. 互動關係 (Flow) ===
+    AlgoMgr -- "1. 管理與切換" --> AgentInterface
+    
+    %% 遊戲迴圈 (Game Loop)
+    AgentInterface -- "2. 決定動作 action (0或1)" --> Step
+    Step -- "3. 回傳 state, reward, done" --> AgentInterface
+    Reset -- "初始化 state" --> AgentInterface
+
+    %% 樣式設定
+    style GameEnv fill:#f9f,stroke:#333,stroke-width:4px
+    style AgentInterface fill:#ff9,stroke:#f66,stroke-width:2px,stroke-dasharray: 5 5
+    style AlgoMgr fill:#9cf,stroke:#333,stroke-width:2px
+    style Obs fill:#e1f5fe
+    style Act fill:#e1f5fe
+```
 ## 1. 遊戲環境 (Game Environment)
 
-核心環境類別位於 `game/environment.py`，它模擬了一個類似 Flappy Bird 的 2048 遊戲環境。
+核心環境類別位於 `game/environment.py`，模擬 Flappy Bird 的遊戲環境。
 
 ### `game.environment.GameEnv`
 
@@ -146,3 +208,4 @@ while not done:
         print("Game Over")
         print(f"Final Score: {info.get('passed_count', 0)}")
 ```
+
