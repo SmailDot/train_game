@@ -458,7 +458,24 @@ PPO 就是要讓這位學生「德智體群美」全面發展。
 
 ### 最終模型的Loss Function圖
 
-[查看Loss Function](https://smaildot.github.io/train_game/2d_loss_plot_PPO_6666_Profile_200k.html)
+#### 📊 完整收斂分析 (15M Steps)
+
+**靜態圖表：**
+- [總損失收斂圖](plots/loss_total_convergence_15M.png) - 清晰展示完整收斂過程
+- [損失分量對比圖](plots/loss_components_convergence_15M.png) - Value/Policy/Entropy Loss 協同變化
+- [綜合視圖](plots/loss_overview_15M.png) - 4子圖全面展示訓練狀態
+- [階段對比圖](plots/loss_phases_comparison_15M.png) - 前期vs後期學習特徵
+
+**交互式3D圖表：**
+- [訓練軌跡3D視圖](plots/loss_3d_trajectory_15M.html) - 可旋轉查看 Loss 空間軌跡
+- [Loss-Reward關係3D](plots/loss_reward_3d_15M.html) - 損失與獎勵的關係演變
+- [多維損失空間3D](plots/loss_space_3d_15M.html) - 三種Loss在空間中的分佈
+
+**詳細分析報告：** [LOSS_CONVERGENCE_REPORT_15M.md](LOSS_CONVERGENCE_REPORT_15M.md)
+
+---
+
+#### 📈 Loss Function 指標說明
 
 **Mean Episode Reward** (平均回合獎勵)：最重要。直接告訴你模型強不強。如果這個不升反降，其他參數再漂亮都沒用。
 
