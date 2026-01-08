@@ -474,7 +474,8 @@ def create_envs(
             "⚠️ 啟用渲染模式：強制將環境數量設為 1 並使用 DummyVecEnv 以避免視窗衝突。"
         )
     else:
-        vec_env_cls = SubprocVecEnv if n_envs > 1 else DummyVecEnv
+        # 在Windows上，使用DummyVecEnv避免multiprocessing問題
+        vec_env_cls = DummyVecEnv  # SubprocVecEnv if n_envs > 1 else DummyVecEnv
 
     print(f"🚀 創建 {n_envs} 個並行環境 (Class: {vec_env_cls.__name__})...")
 
