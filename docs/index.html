@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Train Game｜PPO 強化學習作品展示</title>
+  <style>
+    :root {
+      --bg: #0f1420;
+      --card: #171e2e;
+      --text: #e6e9f2;
+      --muted: #9aa3b8;
+      --accent: #4fd1c5;
+      --accent-2: #f6ad55;
+      --border: #26304a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      line-height: 1.7;
+    }
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(15, 20, 32, 0.92);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(6px);
+    }
+    nav .wrap {
+      display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+      padding: 12px 20px;
+    }
+    nav .brand { font-weight: 700; color: var(--accent); margin-right: auto; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+    nav a:hover { color: var(--text); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+    header.hero { padding: 72px 0 48px; }
+    header.hero h1 { font-size: 2.2rem; margin: 0 0 12px; }
+    header.hero p { color: var(--muted); margin: 0; max-width: 680px; }
+    section { padding: 40px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 1.5rem; margin: 0 0 16px; color: var(--accent); }
+    h3 { font-size: 1.1rem; margin: 24px 0 8px; }
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px; margin-top: 8px;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+    }
+    .stat-value { font-size: 2rem; font-weight: 700; color: var(--accent-2); }
+    .stat-label { color: var(--muted); font-size: 14px; }
+    table {
+      width: 100%; border-collapse: collapse; margin-top: 8px;
+      background: var(--card); border-radius: 12px; overflow: hidden;
+    }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 15px; }
+    th { color: var(--accent); font-weight: 600; }
+    code { background: #222b40; padding: 2px 6px; border-radius: 6px; font-size: 14px; }
+    figure { margin: 0 0 24px; }
+    figure img { width: 100%; border-radius: 12px; border: 1px solid var(--border); background: #fff; }
+    figcaption { color: var(--muted); font-size: 14px; margin-top: 8px; }
+    ul.links { list-style: none; padding: 0; display: grid; gap: 12px; }
+    ul.links a { color: var(--accent); }
+    ul.links span { color: var(--muted); font-size: 14px; display: block; }
+    .projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    footer { padding: 32px 0; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand">Train Game</span>
+    <a href="#results">成果</a>
+    <a href="#architecture">系統架構</a>
+    <a href="#reward">獎勵設計</a>
+    <a href="#charts">訓練曲線</a>
+    <a href="#projects">專案連結</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>🎮 Train Game｜PPO 強化學習訓練平台</h1>
+    <p>以 Pygame 建立 Flappy-like 遊戲環境，搭配 Stable-Baselines3 的 PPO 演算法訓練 AI 過關。這個網站是課堂第九週作業的作品展示頁，內容與開發規則都記錄在 repo 內的 AGENTS.md。</p>
+  </div>
+</header>
+
+<section id="results">
+  <div class="wrap">
+    <h2>最終成果（v5 Final）</h2>
+    <div class="stats">
+      <div class="card">
+        <div class="stat-value">99%</div>
+        <div class="stat-label">100 次確定性評估中通關 99 場</div>
+      </div>
+      <div class="card">
+        <div class="stat-value">7647</div>
+        <div class="stat-label">平均獎勵（CHANGELOG 記載，約對應遊戲分數 6647）</div>
+      </div>
+      <div class="card">
+        <div class="stat-value">7 維</div>
+        <div class="stat-label">觀察向量：玩家狀態、障礙物與縫隙位置</div>
+      </div>
+    </div>
+    <p style="color: var(--muted); margin-top: 20px;">數字出自 repo 內的 README 與 CHANGELOG（2025-12-05 條目）。</p>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <h2>系統架構</h2>
+    <table>
+      <tr><th>項目</th><th>設定</th></tr>
+      <tr><td>演算法</td><td>PPO（Stable-Baselines3，PyTorch）</td></tr>
+      <tr><td>觀察空間</td><td><code>[y, vy, x_obs, gap_top, gap_bottom, rel_top, rel_bottom]</code>，正規化後的 7 維向量</td></tr>
+      <tr><td>動作空間</td><td><code>Discrete(2)</code>：0 不跳、1 跳躍</td></tr>
+      <tr><td>策略網路</td><td>MLP，隱藏層 <code>[256, 256]</code>，ReLU</td></tr>
+      <tr><td>並行環境</td><td>32 個訓練環境，額外 4 個評估環境</td></tr>
+      <tr><td>決策跳幀</td><td>FrameSkip = 4</td></tr>
+      <tr><td>監控工具</td><td>TensorBoard、Replay 回放、Auto-Resume 自動續訓</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="reward">
+  <div class="wrap">
+    <h2>獎勵設計</h2>
+    <table>
+      <tr><th>行為</th><th>獎勵</th><th>設計目的</th></tr>
+      <tr><td>通關</td><td>+1000</td><td>追求最終勝利，而不只是存活</td></tr>
+      <tr><td>通過障礙</td><td>+5</td><td>階段性成就，引導穿越縫隙</td></tr>
+      <tr><td>中心對齊</td><td>最多 +0.05</td><td>低權重輔助，減少碰撞風險</td></tr>
+      <tr><td>存活</td><td>+0.01 / 步</td><td>核心驅動力</td></tr>
+      <tr><td>撞牆或出界</td><td>-5</td><td>強烈懲罰死亡</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="charts">
+  <div class="wrap">
+    <h2>訓練曲線</h2>
+    <figure>
+      <img src="assets/loss_overview_15M.png" alt="15M 步訓練損失總覽">
+      <figcaption>15M 步訓練的損失總覽（來源：<code>outputs/plots/loss_overview_15M.png</code>）</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/loss_phases_comparison_15M.png" alt="不同訓練階段的損失比較">
+      <figcaption>各訓練階段的損失比較（來源：<code>outputs/plots/loss_phases_comparison_15M.png</code>）</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="projects">
+  <div class="wrap">
+    <h2>專案連結</h2>
+    <ul class="links">
+      <li><a href="https://github.com/SmailDot/train_game">GitHub Repository</a><span>完整程式碼、訓練設定與文件</span></li>
+      <li><a href="https://github.com/SmailDot/train_game/blob/main/AGENTS.md">AGENTS.md</a><span>給 AI 協作工具閱讀的專案規則：結構、格式與新增內容的流程</span></li>
+      <li><a href="https://github.com/SmailDot/train_game/blob/main/README.md">README</a><span>功能說明、系統結構圖與 PPO 公式詳解</span></li>
+      <li><a href="https://github.com/SmailDot/train_game/tree/main/outputs/videos">評估影片</a><span>AI 通關的錄影（outputs/videos）</span></li>
+      <li><a href="https://github.com/SmailDot/train_game/blob/main/CHANGELOG.md">CHANGELOG</a><span>版本更新紀錄，記錄從 v1 到 v5 Final 的調整</span></li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Train Game · MIT License · 課堂作業第九週展示頁
+  </div>
+</footer>
+
+</body>
+</html>
